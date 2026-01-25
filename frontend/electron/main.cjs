@@ -93,7 +93,7 @@ function createWindow() {
     },
     icon: path.join(__dirname, '../public/icon.png'),
     backgroundColor: '#0a0a0f',
-    title: 'Smurf Manager',
+    title: 'Savana',
     show: false,
     paintWhenInitiallyHidden: true,
     autoHideMenuBar: true,

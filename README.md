@@ -1,137 +1,90 @@
-# Smurf Manager - League of Legends
+# Savana
 
-Application pour gérer et suivre plusieurs comptes LoL (smurfs) avec statistiques automatiques via l'API Riot.
+**Savana** est une application desktop moderne pour gérer et suivre vos comptes League of Legends avec statistiques automatiques via l'API Riot.
 
-## 🚀 Démarrage Rapide
+![Electron](https://img.shields.io/badge/Electron-47848F?style=flat&logo=electron&logoColor=white)
+![Vue.js](https://img.shields.io/badge/Vue.js-4FC08D?style=flat&logo=vue.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
+
+## Fonctionnalités
+
+- **Multi-comptes** : Gérez tous vos comptes LoL en un seul endroit
+- **Stats automatiques** : Ranks, KDA, Winrate, Champions préférés
+- **Filtres avancés** : 30 jours / Saison, Ranked / All games
+- **Interface moderne** : Design sombre, animations fluides
+- **Cross-platform** : Windows, Linux, macOS
+
+## Installation
+
+### Prérequis
+
+- Node.js 18+
+- Clé API Riot Games ([developer.riotgames.com](https://developer.riotgames.com))
+
+### Démarrage rapide
 
 ```bash
-chmod +x start_node.sh
-./start_node.sh
+# Cloner le repo
+git clone https://github.com/TsRun/Savana.git
+cd Savana
+
+# Configurer l'environnement
+cp .env.example .env
+# Éditer .env avec votre clé API Riot
+
+# Installer les dépendances
+cd frontend
+npm install
+
+# Lancer l'application
+npm run start
 ```
 
-Puis ouvrir : **http://localhost:5173**
+## Scripts disponibles
 
-Login par défaut : `admin` / `admin123`
+| Commande | Description |
+|----------|-------------|
+| `npm run start` | Lance l'app Electron complète |
+| `npm run dev:fullstack` | Lance backend + frontend (sans Electron) |
+| `npm run dev` | Frontend uniquement (Vite) |
+| `npm run server` | Backend uniquement (Node.js) |
+| `npm run electron:build` | Build pour production |
 
-## 📁 Structure
-
-```
-├── frontend/
-│   ├── server/              # Backend Node.js/Express
-│   │   ├── config.js        # Configuration
-│   │   ├── server.js        # Serveur principal
-│   │   ├── models/          # Database SQLite
-│   │   ├── routes/          # API routes (auth, smurfs, etc.)
-│   │   └── utils/           # Riot API calls
-│   ├── src/                 # Frontend Vue.js
-│   └── package.json
-├── .env                     # Variables d'environnement
-└── Smurfs.json              # Backup JSON (optionnel)
-```
-
-## 🛠️ Stack Technique
+## Stack technique
 
 - **Frontend** : Vue.js 3 + Vite
 - **Backend** : Node.js + Express
 - **Database** : SQLite (better-sqlite3)
-- **API** : Riot Games API (EUW1)
-- **Sessions** : express-session
+- **Desktop** : Electron
+- **API** : Riot Games API
+- **Style** : Tailwind CSS
 
-## ⚙️ Configuration
+## Configuration
 
-Créer/modifier `.env` à la racine :
+Créer un fichier `.env` à la racine du projet :
 
 ```env
-RIOT_API_KEY=RGAPI-votre-clé-ici
+RIOT_API_KEY=RGAPI-votre-cle-ici
 SECRET_KEY=votre-secret-session
-PORT=3000
 ```
 
-## 📦 Installation Manuelle
+## Structure du projet
 
-```bash
-cd frontend
-npm install
+```
+Savana/
+├── frontend/
+│   ├── src/           # Vue.js components
+│   ├── server/        # Express backend
+│   ├── electron/      # Electron main process
+│   └── public/        # Assets statiques
+├── .env               # Configuration (non versionné)
+└── README.md
 ```
 
-## 🎮 Scripts Disponibles
+## Licence
 
-```bash
-npm run dev           # Frontend uniquement (Vite)
-npm run server        # Backend uniquement (Node.js)
-npm run dev:fullstack # Frontend + Backend ensemble
-```
-
-## 🔑 Fonctionnalités
-
-- ✅ Multi-utilisateurs avec authentification
-- ✅ Gestion de plusieurs smurfs par utilisateur
-- ✅ Mise à jour automatique des ranks (SoloQ/Flex)
-- ✅ Statistiques de jeu (KDA, Winrate, Champions)
-- ✅ Filtres : 30 jours / Saison complète
-- ✅ Filtres : Ranked uniquement / Tous les modes
-- ✅ Stockage persistant en SQLite
-
-## 🌐 Endpoints API
-
-- `POST /api/auth/register` - Inscription
-- `POST /api/auth/login` - Connexion
-- `POST /api/auth/logout` - Déconnexion
-- `GET /api/auth/me` - Utilisateur actuel
-- `GET /api/smurfs` - Liste des smurfs
-- `POST /api/smurfs` - Ajouter un smurf
-- `DELETE /api/smurfs/:id` - Supprimer un smurf
-- `POST /api/smurfs/refresh` - Actualiser les données
-- `PUT /api/preferences` - Mettre à jour les préférences
-
-## 📊 Base de Données
-
-**Tables** :
-- `users` - Utilisateurs avec mots de passe hashés (SHA256)
-- `smurfs` - Comptes LoL liés aux utilisateurs
-- `user_preferences` - Filtres sauvegardés (période, queue)
-
-**Localisation** : `frontend/smurfs.db`
-
-## 🔧 Développement
-
-Le frontend utilise un **proxy Vite** pour `/api` → `http://localhost:3000`, évitant les problèmes CORS.
-
-Configuration dans `vite.config.js` :
-```javascript
-server: {
-  proxy: {
-    '/api': 'http://localhost:3000'
-  }
-}
-```
-
-## 📝 Notes
-
-- La clé API Riot doit être renouvelée toutes les 24h (mode développement)
-- Les données sont mises à jour à la demande via le bouton "Actualiser"
-- La base SQLite se crée automatiquement au premier lancement
-
-## 🐛 Dépannage
-
-**Backend ne démarre pas** :
-```bash
-cd frontend
-npm install
-node server/server.js
-```
-
-**Frontend ne démarre pas** :
-```bash
-cd frontend
-npm run dev
-```
-
-**Erreur API Riot** :
-- Vérifier que `RIOT_API_KEY` est dans `.env`
-- Vérifier que la clé n'a pas expiré
-- Vérifier les logs : console backend
+MIT License - Voir [LICENSE](LICENSE)
 
 ---
 
-**Développé avec** ❤️ pour les joueurs de League of Legends
+**Développé par TsRun**

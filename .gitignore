@@ -7,9 +7,14 @@ __pycache__/
 *.db
 *.db-journal
 
-# Environnement
+# Environnement - SENSIBLE
+.env
 .env.local
 .env.*.local
+
+# Données sensibles
+Smurfs.json
+smurfs.db
 
 # Logs
 *.log
@@ -26,7 +31,9 @@ yarn-error.log*
 
 # Build
 dist/
+dist-electron/
 build/
+out/
 
 # OS
 .DS_Store
@@ -35,4 +42,7 @@ Thumbs.db
 # Backup
 *.bak
 *_old.*
-Smurfs.json.backup
+*.backup
+
+# Package lock (optionnel)
+package-lock.json

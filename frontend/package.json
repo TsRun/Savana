@@ -1,9 +1,9 @@
 {
-  "name": "smurf-manager",
+  "name": "savana",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "League of Legends Smurf Manager with auto-login",
+  "description": "Savana - League of Legends Account Manager",
   "author": "Mathis",
   "main": "electron/main.cjs",
   "scripts": {
@@ -22,8 +22,8 @@
     "preview": "vite preview"
   },
   "build": {
-    "appId": "com.smurfmanager.app",
-    "productName": "Smurf Manager",
+    "appId": "com.savana.app",
+    "productName": "Savana",
     "directories": {
       "output": "release"
     },

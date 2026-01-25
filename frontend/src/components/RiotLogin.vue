@@ -3,10 +3,10 @@
     <div class="w-full max-w-md">
       <!-- Logo/Header -->
       <div class="text-center mb-8">
-        <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur-xl flex items-center justify-center text-4xl">
-          ⚔️
+        <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur-xl flex items-center justify-center text-4xl font-bold text-white">
+          SV
         </div>
-        <h1 class="text-4xl font-bold text-white mb-2">Smurf Manager</h1>
+        <h1 class="text-4xl font-bold text-white mb-2">Savana</h1>
         <p class="text-blue-100">League of Legends Account Manager</p>
       </div>
 

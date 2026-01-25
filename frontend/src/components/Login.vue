@@ -12,10 +12,10 @@
       <!-- Logo -->
       <div class="login-header">
         <div class="logo-wrapper">
-          <div class="logo-icon-box">SM</div>
+          <div class="logo-icon-box">SV</div>
           <div class="logo-glow"></div>
         </div>
-        <h1 class="login-title">Smurf Manager</h1>
+        <h1 class="login-title">Savana</h1>
         <p class="login-subtitle">{{ isRegister ? 'Create your account' : 'Welcome back' }}</p>
       </div>
 
@@ -107,7 +107,7 @@
 
     <!-- Version Info -->
     <div class="version-info">
-      Smurf Manager v2.0
+      Savana v2.0
     </div>
   </div>
 </template>

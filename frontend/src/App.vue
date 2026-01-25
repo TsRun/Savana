@@ -2,8 +2,8 @@
   <div class="app-container">
     <div class="titlebar" v-if="isElectron">
       <div class="titlebar-title">
-        <span class="titlebar-icon">SM</span>
-        <span>Smurf Manager</span>
+        <span class="titlebar-icon">SV</span>
+        <span>Savana</span>
       </div>
       <div class="titlebar-controls">
         <button class="titlebar-btn minimize" @click="minimizeWindow" title="Minimize">
@@ -22,9 +22,9 @@
       <aside class="sidebar">
         <div class="sidebar-header">
           <div class="logo">
-            <div class="logo-icon-box">SM</div>
+            <div class="logo-icon-box">SV</div>
             <div class="logo-text">
-              <span class="logo-title">Smurf Manager</span>
+              <span class="logo-title">Savana</span>
               <span class="logo-subtitle">v2.0</span>
             </div>
           </div>
