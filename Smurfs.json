@@ -1,0 +1,218 @@
+[
+    {
+        "UserName": "TsRunL",
+        "Password": "TsRun8237*",
+        "Pseudo": "dianariz#LSD\u00e9",
+        "PUUID": "nycdqWw3o1vNru4tCYxmNWI2q0R_-CIz_DteQTVeV2G4nGcgx6kQ4YQrbRjn5HtKsR5bqbYvKHit3Q",
+        "Elo_SoloQ": "Emerald IV - 19 LP (55% WR, 11W/9L)",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 2.96,
+            "avg_kills": 9.4,
+            "avg_deaths": 5.5,
+            "avg_assists": 7.0,
+            "winrate": 51,
+            "wins": 25,
+            "losses": 24,
+            "total_games": 49,
+            "main_role": "JUNGLE",
+            "role_percentage": 67,
+            "best_champion": {
+                "name": "Ekko",
+                "winrate": 60,
+                "kda": 3.75,
+                "games": 28
+            }
+        },
+        "Level": 46
+    },
+    {
+        "UserName": "TsRun8",
+        "Password": "Mathis82370",
+        "Pseudo": "Garen Armpit#TsRun",
+        "PUUID": "iUP3bQVwd00r9eWzoN6nEhJilkCI3aXaVBJPo2cE1at9AaJJY6NxqnOclTidwJJIuShIsVW2BMnBPQ",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 2.24,
+            "avg_kills": 8.0,
+            "avg_deaths": 5.5,
+            "avg_assists": 4.3,
+            "winrate": 50,
+            "wins": 3,
+            "losses": 3,
+            "total_games": 6,
+            "main_role": "TOP",
+            "role_percentage": 66,
+            "best_champion": {
+                "name": "Garen",
+                "winrate": 75,
+                "kda": 3.44,
+                "games": 4
+            }
+        },
+        "Level": 1211
+    },
+    {
+        "UserName": "TsRun823",
+        "Password": "Mathis82370",
+        "Pseudo": "SkibydiNapalm#BOMB",
+        "PUUID": "n0qqJm0LuZC6CMyiEv1AsM9oCnlAmbDQSsa73WnBt9CSk_X_RxqrjND8l3HvQR_6ujxefj-RWIEGaw",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 4.0,
+            "avg_kills": 7.0,
+            "avg_deaths": 3.0,
+            "avg_assists": 5.0,
+            "winrate": 100,
+            "wins": 1,
+            "losses": 0,
+            "total_games": 1,
+            "main_role": "TOP",
+            "role_percentage": 100,
+            "best_champion": {
+                "name": "Garen",
+                "winrate": 100,
+                "kda": 4.0,
+                "games": 1
+            }
+        },
+        "Level": 78
+    },
+    {
+        "UserName": "tatsu9918",
+        "Password": "ansatsukyoushitsu9918",
+        "Pseudo": "Ryuo#9918",
+        "PUUID": "OTH1Q6E3JiI-AYwd75z8LC2QracjcUK-3_oGceHWRgVQQElPh3_vtbPjqq-rFAM1Xsyf0PyrEWdvMg",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 2.68,
+            "avg_kills": 9.3,
+            "avg_deaths": 6.0,
+            "avg_assists": 6.8,
+            "winrate": 70,
+            "wins": 7,
+            "losses": 3,
+            "total_games": 10,
+            "main_role": "TOP",
+            "role_percentage": 90,
+            "best_champion": {
+                "name": "Garen",
+                "winrate": 60,
+                "kda": 3.54,
+                "games": 5
+            }
+        },
+        "Level": 552
+    },
+    {
+        "UserName": "linalannel",
+        "Password": "hoopaislegit666",
+        "Pseudo": "Veigar#iles",
+        "PUUID": "GuArUELcXtO3CUXqwaW8081KtpcAHSC8o2QJVgmarWgpOpMuE8JOMBM-gYxzm3UqtOyq-a8HyH6zmg",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 0.25,
+            "avg_kills": 0.0,
+            "avg_deaths": 12.0,
+            "avg_assists": 3.0,
+            "winrate": 0,
+            "wins": 0,
+            "losses": 1,
+            "total_games": 1,
+            "main_role": "MIDDLE",
+            "role_percentage": 100,
+            "best_champion": {
+                "name": "Veigar",
+                "winrate": 0,
+                "kda": 0.25,
+                "games": 1
+            }
+        },
+        "Level": 50
+    },
+    {
+        "UserName": "Belyneve",
+        "Password": "hoopaislegit666",
+        "Pseudo": "cra 12pa 6pm#001",
+        "PUUID": "18FggAarunZGJEoYzbl0ZrhsfbVSf0V6UY8mIAmvdvh_3CoCanhHXlFR5qD6Q5RdepmQmSxDOp-VQQ",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 2.4,
+            "avg_kills": 10.2,
+            "avg_deaths": 6.7,
+            "avg_assists": 5.8,
+            "winrate": 50,
+            "wins": 3,
+            "losses": 3,
+            "total_games": 6,
+            "main_role": "JUNGLE",
+            "role_percentage": 66,
+            "best_champion": {
+                "name": "Ekko",
+                "winrate": 60,
+                "kda": 2.53,
+                "games": 5
+            }
+        },
+        "Level": 61
+    },
+    {
+        "UserName": "annieboulot",
+        "Password": "laser800",
+        "Pseudo": "\u039a\u039a\u039a \u0391llah#EUW",
+        "PUUID": "ZaNXy3wzyhNVYUvqXA9iP6KZCzcicPZbrgFCgHeZPc8WNqI-xmR_qfbtDu2Oal8XY1vjABWgLh3WUg",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Stats": {
+            "kda": 2.52,
+            "avg_kills": 8.0,
+            "avg_deaths": 4.8,
+            "avg_assists": 4.1,
+            "winrate": 50,
+            "wins": 5,
+            "losses": 5,
+            "total_games": 10,
+            "main_role": "TOP",
+            "role_percentage": 90,
+            "best_champion": {
+                "name": "Garen",
+                "winrate": 50,
+                "kda": 3.38,
+                "games": 6
+            }
+        },
+        "Level": 53
+    },
+    {
+        "UserName": "TsRun82378",
+        "Password": "Mathis82370",
+        "Pseudo": "her tein#suce",
+        "PUUID": "QcVnVNh9gLBs2lxB-1bUkUJbx7THiSnoOjVjMHHMIBOpwQCae433vZjuCebmZvjCgv764rsjwV4q8w",
+        "Elo_SoloQ": "Unranked",
+        "Elo_Flex": "Unranked",
+        "Level": 18,
+        "Stats": {
+            "kda": 2.38,
+            "avg_kills": 5.0,
+            "avg_deaths": 4.0,
+            "avg_assists": 4.5,
+            "winrate": 50,
+            "wins": 1,
+            "losses": 1,
+            "total_games": 2,
+            "main_role": "JUNGLE",
+            "role_percentage": 50,
+            "best_champion": {
+                "name": "Ekko",
+                "winrate": 100,
+                "kda": 5.0,
+                "games": 1
+            }
+        }
+    }
+]

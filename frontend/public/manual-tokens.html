@@ -1,0 +1,411 @@
+<!DOCTYPE html><!DOCTYPE html>
+
+<html lang="fr"><html lang="fr">
+
+<head><head>
+
+  <meta charset="UTF-8">  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Extraction Manuelle - Tokens Riot</title>  <title>Extraction de Cookies Riot</title>
+
+  <style>  <style>
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+
+    body {      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);      min-height: 100vh;
+
+      min-height: 100vh;      display: flex;
+
+      display: flex;      align-items: center;
+
+      align-items: center;      justify-content: center;
+
+      justify-content: center;      padding: 20px;
+
+      padding: 20px;    }
+
+    }    .container {
+
+      background: white;
+
+    .container {      border-radius: 20px;
+
+      background: white;      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+
+      border-radius: 16px;      max-width: 800px;
+
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);      width: 100%;
+
+      max-width: 900px;      padding: 40px;
+
+      width: 100%;    }
+
+      padding: 40px;    h1 {
+
+    }      color: #333;
+
+      margin-bottom: 10px;
+
+    h1 { color: #764ba2; margin-bottom: 10px; font-size: 28px; }      font-size: 28px;
+
+    .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }    }
+
+    .subtitle {
+
+    .code-block {      color: #666;
+
+      background: #1e1e1e;      margin-bottom: 30px;
+
+      color: #d4d4d4;      font-size: 14px;
+
+      padding: 15px;    }
+
+      border-radius: 8px;    .step {
+
+      margin: 15px 0;      background: #f8f9fa;
+
+      font-family: 'Consolas', 'Monaco', monospace;      border-left: 4px solid #667eea;
+
+      font-size: 13px;      padding: 20px;
+
+      overflow-x: auto;      margin-bottom: 20px;
+
+    }      border-radius: 8px;
+
+    }
+
+    .token-input {    .step h3 {
+
+      width: 100%;      color: #667eea;
+
+      min-height: 150px;      margin-bottom: 10px;
+
+      padding: 15px;      font-size: 16px;
+
+      border: 2px solid #ddd;    }
+
+      border-radius: 8px;    .step p {
+
+      font-family: 'Consolas', 'Monaco', monospace;      color: #555;
+
+      font-size: 13px;      line-height: 1.6;
+
+      resize: vertical;      margin-bottom: 10px;
+
+    }    }
+
+    .step code {
+
+    .btn {      background: #e9ecef;
+
+      padding: 12px 24px;      padding: 2px 6px;
+
+      border: none;      border-radius: 4px;
+
+      border-radius: 8px;      font-family: 'Courier New', monospace;
+
+      font-weight: 600;      font-size: 13px;
+
+      cursor: pointer;      color: #d63384;
+
+      margin: 10px 5px 0 0;    }
+
+    }    textarea {
+
+      width: 100%;
+
+    .btn-primary {      min-height: 150px;
+
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);      padding: 15px;
+
+      color: white;      border: 2px solid #e0e0e0;
+
+    }      border-radius: 8px;
+
+      font-family: 'Courier New', monospace;
+
+    .warning {      font-size: 13px;
+
+      background: #fff3cd;      resize: vertical;
+
+      border-left: 4px solid #ffc107;      transition: border 0.3s;
+
+      padding: 15px;    }
+
+      margin: 20px 0;    textarea:focus {
+
+      color: #856404;      outline: none;
+
+      font-size: 13px;      border-color: #667eea;
+
+    }    }
+
+  </style>    .btn {
+
+</head>      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+<body>      color: white;
+
+  <div class="container">      border: none;
+
+    <h1>🔑 Extraction Manuelle des Tokens</h1>      padding: 15px 30px;
+
+    <p class="subtitle">Méthode de secours pour extraire vos tokens Riot</p>      border-radius: 8px;
+
+      font-size: 16px;
+
+    <h3>Script à exécuter dans la Console DevTools :</h3>      font-weight: bold;
+
+    <div class="code-block">      cursor: pointer;
+
+const tokens = {};      transition: transform 0.2s, box-shadow 0.2s;
+
+for (let i = 0; i < localStorage.length; i++) {      margin-top: 20px;
+
+  const key = localStorage.key(i);      width: 100%;
+
+  tokens[key] = localStorage.getItem(key);    }
+
+}    .btn:hover {
+
+console.log(JSON.stringify(tokens, null, 2));      transform: translateY(-2px);
+
+copy(JSON.stringify(tokens));</div>      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+
+    }
+
+    <div class="warning">    .btn:active {
+
+      ⚠️ Ne partagez JAMAIS vos tokens !      transform: translateY(0);
+
+    </div>    }
+
+    .success {
+
+    <textarea       background: #d4edda;
+
+      class="token-input"       color: #155724;
+
+      id="tokenInput"       padding: 15px;
+
+      placeholder='Collez vos tokens ici au format JSON'      border-radius: 8px;
+
+    ></textarea>      margin-top: 20px;
+
+      border: 1px solid #c3e6cb;
+
+    <button class="btn btn-primary" onclick="saveTokens()">Sauvegarder</button>      display: none;
+
+  </div>    }
+
+    .error {
+
+  <script>      background: #f8d7da;
+
+    function saveTokens() {      color: #721c24;
+
+      const input = document.getElementById('tokenInput').value.trim();      padding: 15px;
+
+      if (!input) {      border-radius: 8px;
+
+        alert('Veuillez coller vos tokens');      margin-top: 20px;
+
+        return;      border: 1px solid #f5c6cb;
+
+      }      display: none;
+
+    }
+
+      try {    .cookie-list {
+
+        const tokens = JSON.parse(input);      background: #f8f9fa;
+
+        localStorage.setItem('riot_tokens_temp', JSON.stringify(tokens));      padding: 15px;
+
+        alert('Tokens sauvegardés ! Retournez dans l\'app.');      border-radius: 8px;
+
+        if (window.opener) window.close();      margin-top: 15px;
+
+      } catch (e) {      max-height: 200px;
+
+        alert('Erreur : Format JSON invalide');      overflow-y: auto;
+
+      }    }
+
+    }    .cookie-item {
+
+  </script>      padding: 8px;
+
+</body>      background: white;
+
+</html>      margin-bottom: 8px;
+
+      border-radius: 4px;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .cookie-name {
+      font-weight: bold;
+      color: #667eea;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🍪 Extraction de Cookies Riot Games</h1>
+    <p class="subtitle">Connectez-vous automatiquement sans retaper vos identifiants</p>
+
+    <div class="step">
+      <h3>📋 Étape 1 : Ouvrir les DevTools</h3>
+      <p>
+        1. Connectez-vous à <strong>https://account.riotgames.com/</strong> avec votre compte<br>
+        2. Appuyez sur <code>F12</code> ou <code>Ctrl+Shift+I</code> pour ouvrir les DevTools<br>
+        3. Allez dans l'onglet <strong>Console</strong>
+      </p>
+    </div>
+
+    <div class="step">
+      <h3>⌨️ Étape 2 : Exécuter le script</h3>
+      <p>Copiez et collez ce code dans la console :</p>
+      <textarea id="extractScript" readonly>
+// Script d'extraction des cookies Riot
+const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+  const [name, value] = cookie.trim().split('=');
+  acc[name] = value;
+  return acc;
+}, {});
+
+// Cookies importants pour l'authentification
+const importantCookies = {
+  ssid: cookies['ssid'] || cookies['riot_ssid'] || '',
+  sub: cookies['sub'] || cookies['riot_sub'] || '',
+  tdid: cookies['tdid'] || cookies['riot_tdid'] || '',
+  csid: cookies['csid'] || cookies['riot_csid'] || '',
+  clid: cookies['clid'] || cookies['riot_clid'] || '',
+  pas: cookies['pas'] || cookies['riot_pas'] || ''
+};
+
+console.log('Cookies extraits:', importantCookies);
+copy(JSON.stringify(importantCookies, null, 2));
+console.log('✅ Cookies copiés dans le presse-papiers !');
+      </textarea>
+      <button class="btn" onclick="copyScript()">📋 Copier le script</button>
+    </div>
+
+    <div class="step">
+      <h3>📥 Étape 3 : Coller les cookies ici</h3>
+      <p>Après avoir exécuté le script, collez les cookies ci-dessous :</p>
+      <textarea id="cookiesInput" placeholder='{"ssid": "...", "sub": "...", "tdid": "..."}'></textarea>
+      
+      <div id="cookiesList" class="cookie-list" style="display: none;">
+        <h4>Cookies détectés :</h4>
+        <div id="cookiesPreview"></div>
+      </div>
+    </div>
+
+    <button class="btn" onclick="saveCookies()">💾 Sauvegarder les cookies</button>
+
+    <div class="success" id="successMsg"></div>
+    <div class="error" id="errorMsg"></div>
+  </div>
+
+  <script>
+    function copyScript() {
+      const script = document.getElementById('extractScript');
+      script.select();
+      document.execCommand('copy');
+      
+      const btn = event.target;
+      const originalText = btn.textContent;
+      btn.textContent = '✅ Copié !';
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 2000);
+    }
+
+    // Preview des cookies en temps réel
+    document.getElementById('cookiesInput').addEventListener('input', function(e) {
+      const value = e.target.value.trim();
+      const preview = document.getElementById('cookiesPreview');
+      const list = document.getElementById('cookiesList');
+      
+      if (!value) {
+        list.style.display = 'none';
+        return;
+      }
+
+      try {
+        const cookies = JSON.parse(value);
+        preview.innerHTML = '';
+        
+        Object.entries(cookies).forEach(([name, value]) => {
+          if (value) {
+            const item = document.createElement('div');
+            item.className = 'cookie-item';
+            item.innerHTML = `
+              <span class="cookie-name">${name}</span>
+              <span>${value.substring(0, 20)}...</span>
+            `;
+            preview.appendChild(item);
+          }
+        });
+        
+        list.style.display = 'block';
+      } catch {
+        list.style.display = 'none';
+      }
+    });
+
+    async function saveCookies() {
+      const input = document.getElementById('cookiesInput').value.trim();
+      const successMsg = document.getElementById('successMsg');
+      const errorMsg = document.getElementById('errorMsg');
+      
+      successMsg.style.display = 'none';
+      errorMsg.style.display = 'none';
+
+      if (!input) {
+        errorMsg.textContent = '❌ Veuillez coller les cookies extraits';
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      try {
+        const cookies = JSON.parse(input);
+        
+        // Vérifier qu'au moins un cookie important est présent
+        if (!cookies.ssid && !cookies.sub && !cookies.tdid) {
+          throw new Error('Aucun cookie d\'authentification trouvé');
+        }
+
+        // Sauvegarder dans localStorage pour récupération
+        localStorage.setItem('riot_cookies_temp', JSON.stringify(cookies));
+        
+        successMsg.innerHTML = `
+          <strong>✅ Cookies sauvegardés avec succès !</strong><br>
+          Cookies trouvés : ${Object.keys(cookies).filter(k => cookies[k]).length}<br>
+          <br>
+          <strong>Prochaine étape :</strong> Retournez dans l'application et cliquez sur "Importer les cookies" pour le smurf concerné.
+        `;
+        successMsg.style.display = 'block';
+
+        // Auto-scroll vers le message
+        successMsg.scrollIntoView({ behavior: 'smooth' });
+        
+      } catch (error) {
+        errorMsg.textContent = `❌ Erreur : ${error.message}. Vérifiez le format JSON.`;
+        errorMsg.style.display = 'block';
+      }
+    }
+  </script>
+</body>
+</html>

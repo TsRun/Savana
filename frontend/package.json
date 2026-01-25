@@ -1,0 +1,82 @@
+{
+  "name": "smurf-manager",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "League of Legends Smurf Manager with auto-login",
+  "author": "Mathis",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server/server.js",
+    "init-db": "node server/init-db.js",
+    "check-db": "node server/check-db.js",
+    "migrate-db": "node server/migrate-db.js",
+    "dev:fullstack": "concurrently \"npm run server\" \"npm run dev\"",
+    "start": "concurrently \"npm run server\" \"npm run dev\" \"sleep 3 && SKIP_BACKEND_SERVER=1 NODE_ENV=development electron .\"",
+    "electron:dev": "concurrently \"npm run server\" \"npm run dev\" \"wait-on http://localhost:5173 http://localhost:3000 && cross-env SKIP_BACKEND_SERVER=1 NODE_ENV=development electron .\"",
+    "electron:serve": "cross-env NODE_ENV=development electron .",
+    "electron:serve-external": "concurrently \"npm run server\" \"npm run dev\" \"wait-on http://localhost:5173 http://localhost:3000 && cross-env SKIP_BACKEND_SERVER=1 NODE_ENV=development electron .\"",
+    "electron:build": "vite build && electron-builder",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.smurfmanager.app",
+    "productName": "Smurf Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.games"
+    }
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "better-sqlite3": "^9.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@headlessui/vue": "^1.7.16",
+    "@heroicons/vue": "^2.0.18",
+    "@tailwindcss/forms": "^0.5.6",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "vite": "^5.0.0",
+    "wait-on": "^9.0.3"
+  }
+}

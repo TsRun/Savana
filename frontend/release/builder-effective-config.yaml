@@ -1,0 +1,26 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.smurfmanager.app
+productName: Smurf Manager
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - server/**/*
+      - public/**/*
+      - package.json
+win:
+  target:
+    - nsis
+  icon: public/icon.png
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Game
+mac:
+  target:
+    - dmg
+  category: public.app-category.games
+electronVersion: 40.0.0
