@@ -1,4 +1,5 @@
 import express from 'express';
+import passport from './config/passport-config.js';
 import session from 'express-session';
 import cors from 'cors';
 import { config } from './config.js';
@@ -7,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import smurfsRoutes from './routes/smurfs.js';
 import preferencesRoutes from './routes/preferences.js';
 import tokensRoutes from './routes/tokens.js';
+import riotClientRoutes from './routes/riotClient.js';
 
 const app = express();
 
@@ -27,6 +29,8 @@ app.use(cors({
   credentials: true
 }));
 
+
+
 // Sessions
 app.use(session({
   secret: config.sessionSecret,
@@ -40,11 +44,17 @@ app.use(session({
   }
 }));
 
+// Sessions (already defined above)
+// Passport initialization
+app.use(passport.initialize());
+app.use(passport.session());
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/smurfs', smurfsRoutes);
 app.use('/api/preferences', preferencesRoutes);
 app.use('/api/tokens', tokensRoutes);
+app.use('/api/riot-client', riotClientRoutes);
 
 // Route /api/refresh (non nested)
 import { refreshSmurfs } from './routes/smurfs.js';
@@ -57,8 +67,21 @@ app.get('/api/health', (req, res) => {
 
 // Démarrer le serveur
 const PORT = config.port;
-app.listen(PORT, 'localhost', () => {
+const server = app.listen(PORT, 'localhost', () => {
   console.log(`\n[SERVER] Backend Node.js demarre sur http://localhost:${PORT}`);
   console.log(`[DB] Base de donnees: ${config.dbPath}`);
   console.log(`[API] Riot API Key: ${config.riotApiKey ? 'Configuree [OK]' : 'Manquante [!]'}\n`);
 });
+
+// Graceful Shutdown
+function shutdown() {
+  console.log('\n[SERVER] Arrêt en cours...');
+  server.close(() => {
+    console.log('[SERVER] Serveur HTTP fermé.');
+    // db.close() si nécessaire (better-sqlite3 le fait souvent auto, mais on peut forcer)
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

@@ -1,6 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+/**
+ * Helper pour obtenir le home directory
+ */
+const getHomeDir = () => {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir();
+};
 
 /**
  * Trouve tous les chemins possibles de Riot Client selon l'OS et les utilisateurs
@@ -16,13 +26,13 @@ function getAllPossibleRiotPaths() {
       const users = fs.readdirSync(usersDir).filter(u => {
         const userPath = path.join(usersDir, u);
         try {
-          return fs.statSync(userPath).isDirectory() && 
-                 !['Public', 'Default', 'Default User', 'All Users', 'desktop.ini'].includes(u);
+          return fs.statSync(userPath).isDirectory() &&
+            !['Public', 'Default', 'Default User', 'All Users', 'desktop.ini'].includes(u);
         } catch {
           return false;
         }
       });
-      
+
       for (const user of users) {
         const basePath = `/mnt/c/Users/${user}/AppData/Local/Riot Games/Riot Client`;
         paths.push({
@@ -54,65 +64,56 @@ function getAllPossibleRiotPaths() {
   return paths;
 }
 
+
 /**
- * Extrait les tokens depuis Local Storage LevelDB
+ * Tue le processus Riot Client
  */
-function extractFromLocalStorage(leveldbPath) {
-  try {
-    if (!fs.existsSync(leveldbPath)) {
-      return null;
-    }
+async function killRiotClient() {
+  const startTime = Date.now();
+  const DURATION = 5000; // 5 secondes de suppression aggressive
 
-    console.log('[Tokens] Scan Local Storage:', leveldbPath);
-    
-    const files = fs.readdirSync(leveldbPath).filter(f => 
-      f.endsWith('.ldb') || f.endsWith('.log')
-    );
+  console.log('[Tokens] Début kill loop (5s)...');
 
-    for (const file of files) {
-      const filePath = path.join(leveldbPath, file);
-      const buffer = fs.readFileSync(filePath);
-      const content = buffer.toString('utf8', 0, buffer.length);
-      
-      const tokens = {};
-      
-      // Patterns pour les tokens Riot
-      const patterns = {
-        accessToken: /eyJhbGciOi[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
-        idToken: /id_token["\s:]+([A-Za-z0-9_\-\.]+)/gi,
-        sub: /"sub"["\s:]+["']([a-f0-9\-]+)["']/gi,
-        ssid: /"ssid"["\s:]+["']([a-zA-Z0-9_\-\.]+)["']/gi,
-        entitlementsToken: /entitlements_token["\s:]+["']([a-zA-Z0-9_\-\.]+)["']/gi
-      };
+  while (Date.now() - startTime < DURATION) {
+    try {
+      const platform = process.platform;
+      let command = '';
 
-      // Extraire access tokens JWT
-      const accessTokenMatches = [...content.matchAll(patterns.accessToken)];
-      if (accessTokenMatches.length > 0) {
-        tokens.accessToken = accessTokenMatches[accessTokenMatches.length - 1][0];
-        console.log('[Tokens] Access Token (JWT):', tokens.accessToken.substring(0, 50) + '...');
-      }
-
-      // Extraire les autres tokens
-      for (const [key, pattern] of Object.entries(patterns)) {
-        if (key === 'accessToken') continue;
-        
-        const matches = [...content.matchAll(pattern)];
-        if (matches.length > 0) {
-          tokens[key] = matches[matches.length - 1][1];
-          console.log(`[Tokens] ${key}:`, tokens[key].substring(0, 30) + '...');
+      if (platform === 'win32') {
+        command = 'taskkill /F /IM RiotClientServices.exe /IM LeagueClient.exe /IM "League of Legends.exe" /IM LeagueClientUx.exe /IM LeagueCrashHandler.exe /IM LeagueClientUxRender.exe /IM RiotClientUx.exe /IM RiotClientUxRender.exe /IM RiotClientCrashHandler.exe /T';
+      } else if (platform === 'darwin') {
+        command = 'pkill -f "Riot Client" && pkill -f "League of Legends"';
+      } else if (platform === 'linux') {
+        // Check if WSL
+        if (fs.existsSync('/mnt/c/')) {
+          // WSL: Use Windows taskkill
+          // Ajout de RiotClientUx.exe, RiotClientUxRender.exe, RiotClientCrashHandler.exe
+          command = 'taskkill.exe /F /IM RiotClientServices.exe /IM LeagueClient.exe /IM "League of Legends.exe" /IM LeagueClientUx.exe /IM LeagueCrashHandler.exe /IM LeagueClientUxRender.exe /IM RiotClientUx.exe /IM RiotClientUxRender.exe /IM RiotClientCrashHandler.exe /T';
+        } else {
+          // Native Linux (Wine/Lutris)
+          command = 'pkill -f RiotClientServices.exe; pkill -f LeagueClient.exe; pkill -f "League of Legends.exe"; pkill -f LeagueClientUx.exe; pkill -f LeagueCrashHandler.exe; pkill -f LeagueClientUxRender.exe; pkill -f RiotClientUx.exe; pkill -f RiotClientUxRender.exe; pkill -f RiotClientCrashHandler.exe';
         }
       }
 
-      if (Object.keys(tokens).length > 0) {
-        return tokens;
+      if (command) {
+        await execPromise(command).catch((e) => {
+          // Suppress "not found" errors which are expected
+          const msg = e.message || '';
+          if (!msg.includes('not found') && !msg.includes('introuvable') && !msg.includes('failed')) {
+            // On ignore souvent 'failed' car taskkill renvoie 128 si un process n'existe pas
+            console.log('[Tokens] Kill info:', msg);
+          }
+        });
       }
+    } catch (e) {
+      // Ignorer
     }
 
-    return null;
-  } catch (e) {
-    console.error('[Tokens] Erreur lecture Local Storage:', e.message);
-    return null;
+    // Pause de 500ms entre chaque kill pour laisser le temps au système
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
+
+  console.log('[Tokens] Fin kill loop.');
 }
 
 /**
@@ -121,17 +122,17 @@ function extractFromLocalStorage(leveldbPath) {
 function extractFromLockfile(configPath) {
   try {
     const lockfilePath = path.join(configPath, 'lockfile');
-    
+
     if (!fs.existsSync(lockfilePath)) {
       return null;
     }
 
     console.log('[Tokens] Lecture lockfile...');
     const content = fs.readFileSync(lockfilePath, 'utf8');
-    
+
     // Format: LeagueClient:PORT:PASSWORD:https
     const match = content.match(/LeagueClient:(\d+):([^:\s]+):(https?)/);
-    
+
     if (match) {
       return {
         port: match[1],
@@ -153,14 +154,14 @@ function extractFromLockfile(configPath) {
 function extractFromYAML(configPath) {
   try {
     const yamlPath = path.join(configPath, 'RiotGamesPrivateSettings.yaml');
-    
+
     if (!fs.existsSync(yamlPath)) {
       return null;
     }
 
     console.log('[Tokens] Lecture YAML:', yamlPath);
     const yamlContent = fs.readFileSync(yamlPath, 'utf8');
-    
+
     const tokens = {};
     const yamlPatterns = {
       persistLoginToken: /persist[-_]login[-_]token:\s*["']?([^"'\n\r]+)["']?/i,
@@ -188,51 +189,157 @@ function extractFromYAML(configPath) {
  */
 async function extractRiotTokens() {
   try {
+    // 1. D'abord fermer le client
+    await killRiotClient();
+
+    // Attendre un peu que le fichier soit libéré
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     const possiblePaths = getAllPossibleRiotPaths();
-    
+
     console.log(`[Tokens] Recherche dans ${possiblePaths.length} emplacements...`);
-    
+
     for (const riotPath of possiblePaths) {
       console.log('[Tokens] Test:', riotPath.config);
-      
-      let allTokens = {};
-      
-      // 1. Local Storage (meilleure source pour access tokens)
-      const localStoragePath = path.join(path.dirname(riotPath.config), 'Data', 'Local Storage', 'leveldb');
-      const lsTokens = extractFromLocalStorage(localStoragePath);
-      if (lsTokens) {
-        allTokens = { ...allTokens, ...lsTokens };
-      }
 
-      // 2. Lockfile (credentials API locale)
-      const lockfileData = extractFromLockfile(riotPath.config);
-      if (lockfileData) {
-        allTokens.lockfile = lockfileData;
-        console.log('[Tokens] Lockfile - Port:', lockfileData.port);
-      }
+      const yamlPath = path.join(riotPath.config, 'RiotGamesPrivateSettings.yaml');
+      const backupPath = yamlPath + '.backup'; // Supposition du nom de backup standard ou mentionné par l'utilisateur
+      // Parfois c'est RiotGamesPrivateSettings.yaml.1 ou autre, mais on va cibler .backup comme demandé
 
-      // 3. YAML (tokens persistants)
-      const yamlTokens = extractFromYAML(riotPath.config);
-      if (yamlTokens) {
-        allTokens = { ...allTokens, ...yamlTokens };
-      }
+      if (fs.existsSync(yamlPath)) {
+        try {
+          // 2. Extraire (Lire) le fichier
+          console.log('[Tokens] Lecture YAML pour extraction:', yamlPath);
+          const content = fs.readFileSync(yamlPath, 'utf8');
 
-      // Si on a trouvé des tokens, retourner
-      if (Object.keys(allTokens).length > 0) {
-        console.log('[Tokens] Total extraits:', Object.keys(allTokens).length);
-        console.log('[Tokens] Types:', Object.keys(allTokens).join(', '));
-        return allTokens;
+          // Sauvegarder ce qu'on a lu pour l'analyser
+          const yamlTokens = extractFromYAMLContent(content);
+
+          // 3. Supprimer le fichier et le backup
+          console.log('[Tokens] Suppression des fichiers config...');
+          try {
+            fs.unlinkSync(yamlPath);
+            if (fs.existsSync(backupPath)) {
+              fs.unlinkSync(backupPath);
+            }
+            // Essayer aussi de supprimer d'autres backups potentiels si nécessaire, 
+            // mais l'utilisateur a dit "le .backup"
+          } catch (delErr) {
+            console.error('[Tokens] Erreur suppression:', delErr.message);
+          }
+
+          // 4. Recopier dans le dossier
+          console.log('[Tokens] Restauration du fichier...');
+          fs.writeFileSync(yamlPath, content);
+
+          // On retourne les tokens trouvés
+          if (yamlTokens) {
+            console.log('[Tokens] Total extraits:', Object.keys(yamlTokens).length);
+            return yamlTokens;
+          }
+
+        } catch (e) {
+          console.error('[Tokens] Erreur manipulation fichier:', e.message);
+          // Continuer aux autres chemins si échec
+        }
       }
     }
 
-    throw new Error('Aucun token trouvé. Connectez-vous à Riot Client et lancez League of Legends au moins une fois.');
+    throw new Error('Aucun token trouvé ou erreur manipulation fichiers.');
   } catch (error) {
     console.error('[Tokens] Erreur:', error.message);
     throw error;
   }
 }
 
+function extractFromYAMLContent(yamlContent) {
+  const tokens = {};
+  const yamlPatterns = {
+    persistLoginToken: /persist[-_]login[-_]token:\s*["']?([^"'\n\r]+)["']?/i,
+    rsoToken: /rso[-_]token:\s*["']?([^"'\n\r]+)["']?/i,
+    authToken: /auth[-_]token:\s*["']?([^"'\n\r]+)["']?/i
+  };
+
+  for (const [key, pattern] of Object.entries(yamlPatterns)) {
+    const match = yamlContent.match(pattern);
+    if (match && match[1]) {
+      tokens[key] = match[1].trim();
+    }
+  }
+  return Object.keys(tokens).length > 0 ? tokens : null;
+}
+
+/**
+ * Trouve l'exécutable Riot Client
+ */
+function getRiotClientExecutable() {
+  const platform = process.platform;
+  let clientPath = null;
+
+  if (platform === 'linux') {
+    const possiblePaths = [
+      '/mnt/c/Riot Games/Riot Client/RiotClientServices.exe',
+      path.join(getHomeDir(), '.wine/drive_c/Riot Games/Riot Client/RiotClientServices.exe'),
+      '/opt/Riot Games/Riot Client/RiotClientServices.exe'
+    ];
+
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        clientPath = p;
+        break;
+      }
+    }
+  } else if (platform === 'win32') {
+    const standardPath = 'C:\\Riot Games\\Riot Client\\RiotClientServices.exe';
+    if (fs.existsSync(standardPath)) clientPath = standardPath;
+  } else if (platform === 'darwin') {
+    const standardPath = '/Applications/Riot Games/Riot Client.app';
+    if (fs.existsSync(standardPath)) clientPath = standardPath;
+  }
+
+  return clientPath;
+}
+
+/**
+ * Lance League of Legends avec arguments
+ */
+async function launchLeague() {
+  const clientPath = getRiotClientExecutable();
+  if (!clientPath) {
+    throw new Error('Riot Client introuvable pour le lancement');
+  }
+
+  const platform = process.platform;
+  let command;
+
+  console.log('[Tokens] Launching League via:', clientPath);
+
+  if (platform === 'win32') {
+    command = `"${clientPath}" --launch-product=league_of_legends --launch-patchline=live`;
+  } else if (platform === 'darwin') {
+    command = `open "${clientPath}" --args --launch-product=league_of_legends`;
+  } else if (platform === 'linux') {
+    if (clientPath.startsWith('/mnt/c/')) {
+      const windowsPath = clientPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
+      command = `cmd.exe /c start "" "${windowsPath}" --launch-product=league_of_legends --launch-patchline=live`;
+    } else {
+      command = `wine "${clientPath}" --launch-product=league_of_legends --launch-patchline=live`;
+    }
+  }
+
+  if (command) {
+    // On n'attend pas forcément la fin du process
+    exec(command);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
+  extractRiotTokens,
+  killRiotClient,
   getAllPossibleRiotPaths,
-  extractRiotTokens
+  launchLeague,
+  getRiotClientExecutable
 };
+

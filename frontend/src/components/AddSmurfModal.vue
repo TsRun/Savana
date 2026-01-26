@@ -2,57 +2,27 @@
   <div v-if="isOpen" class="modal-overlay" @click.self="close">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>Add Account</h3>
-        <button @click="close" class="close-btn">X</button>
+        <h3>Ajouter un compte</h3>
+        <button @click="close" class="close-btn">×</button>
       </div>
       
       <form @submit.prevent="handleSubmit">
         <div class="form-group">
-          <label>PUUID</label>
+          <label>Riot ID (Pseudo#Tag)</label>
           <input 
-            v-model="form.puuid" 
+            v-model="form.riotId" 
             type="text" 
-            placeholder="PUUID Riot" 
+            placeholder="Ex: TsRun#EUW"
             required
           >
-          <small>Trouvez votre PUUID sur le site Riot Developer</small>
-        </div>
-        
-        <div class="form-group">
-          <label>Pseudo (in-game)</label>
-          <input 
-            v-model="form.pseudo" 
-            type="text" 
-            placeholder="Nom d'invocateur" 
-            required
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>Username</label>
-          <input 
-            v-model="form.username" 
-            type="text" 
-            placeholder="Nom de connexion Riot" 
-            required
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>Password</label>
-          <input 
-            v-model="form.password" 
-            type="password" 
-            placeholder="Mot de passe" 
-            required
-          >
+          <small>Format: NomDeJeu#Tag</small>
         </div>
         
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" @click="close">
             Annuler
           </button>
-          <button type="submit" class="btn btn-primary" :disabled="loading">
+          <button type="submit" class="btn btn-primary" :disabled="loading || !form.riotId">
             {{ loading ? 'Ajout...' : 'Ajouter' }}
           </button>
         </div>
@@ -71,16 +41,14 @@ const props = defineProps({
 const emit = defineEmits(['close', 'add']);
 
 const loading = ref(false);
+
 const form = ref({
-  puuid: '',
-  pseudo: '',
-  username: '',
-  password: ''
+  riotId: ''
 });
 
 watch(() => props.isOpen, (val) => {
   if (val) {
-    form.value = { puuid: '', pseudo: '', username: '', password: '' };
+    form.value = { riotId: '' };
   }
 });
 
@@ -90,8 +58,12 @@ function close() {
 
 async function handleSubmit() {
   loading.value = true;
+  
   try {
-    emit('add', { ...form.value });
+    // Only send the Riot ID. Backend will handle parsing and PUUID fetching.
+    emit('add', { 
+      riotId: form.value.riotId
+    });
     close();
   } finally {
     loading.value = false;
@@ -118,7 +90,9 @@ async function handleSubmit() {
   border-radius: 16px;
   padding: 24px;
   width: 90%;
-  max-width: 450px;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
   animation: slideUp 0.3s ease;
 }
 
@@ -126,7 +100,7 @@ async function handleSubmit() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .modal-header h3 {
@@ -141,21 +115,82 @@ async function handleSubmit() {
   font-size: 1.5rem;
   cursor: pointer;
   transition: color 0.2s;
+  line-height: 1;
 }
 
 .close-btn:hover {
   color: var(--text-primary);
 }
 
-.form-group {
+.riot-import-section {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.1), rgba(185, 28, 28, 0.1));
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 12px;
+  padding: 16px;
   margin-bottom: 20px;
+}
+
+.btn-riot-import {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-riot-import:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  transform: translateY(-1px);
+}
+
+.btn-riot-import:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.riot-status {
+  font-size: 0.8rem;
+  margin-top: 10px;
+  text-align: center;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.divider span {
+  padding: 0 12px;
+}
+
+.form-group {
+  margin-bottom: 16px;
 }
 
 .form-group label {
   display: block;
   font-size: 0.875rem;
   font-weight: 500;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--text-secondary);
 }
 
@@ -182,7 +217,7 @@ async function handleSubmit() {
 
 .form-group small {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 0.75rem;
   color: var(--text-muted);
 }
@@ -191,7 +226,16 @@ async function handleSubmit() {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  margin-top: 28px;
+  margin-top: 24px;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes fadeIn {

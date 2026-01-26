@@ -4,8 +4,8 @@ import { getSummonerLevel, getMatchIds, calculateStats, getRankData, formatRank,
 
 const router = express.Router();
 
-// Cache pour éviter les refreshs trop fréquents (5 minutes minimum entre refreshs)
-const REFRESH_COOLDOWN = 5 * 60 * 1000; // 5 minutes en ms
+// Cache pour les refreshs (10 minutes minimum)
+const REFRESH_COOLDOWN = 10 * 60 * 1000;
 
 function requireAuth(req, res, next) {
   if (!req.session.user_id) {
@@ -20,12 +20,12 @@ function requireAuth(req, res, next) {
 router.get('/', requireAuth, (req, res) => {
   const userId = req.session.user_id;
   const smurfs = db.getUserSmurfs(userId);
-  
+
   const prefs = db.getUserPreferences(userId);
   const period = prefs?.stats_period || '30';
   const queue = prefs?.stats_queue || 'ranked';
   const statsKey = `stats_${period}_${queue}`;
-  
+
   const formattedSmurfs = smurfs.map(smurf => ({
     PUUID: smurf.puuid,
     Pseudo: smurf.pseudo,
@@ -48,9 +48,11 @@ router.get('/', requireAuth, (req, res) => {
     Level: smurf.level,
     Stats: smurf[statsKey],
     last_updated: smurf.last_updated,
-    id: smurf.id
+    id: smurf.id,
+    hasToken: !!smurf.riot_tokens,
+    is_syncing: false // Could be real if we track global state
   }));
-  
+
   res.json(formattedSmurfs);
 });
 
@@ -59,17 +61,41 @@ router.get('/', requireAuth, (req, res) => {
  */
 router.post('/', requireAuth, async (req, res) => {
   const userId = req.session.user_id;
-  const { puuid, pseudo, username, password } = req.body;
-  
-  if (!puuid || !pseudo) {
-    return res.status(400).json({ error: 'PUUID et pseudo requis' });
+  let { puuid, pseudo, riotId } = req.body;
+
+  // 1. If we have a RiotID (Name#Tag), try to get the PUUID automatically
+  // Support both "riotId" (from frontend) or "pseudo" field being Name#Tag
+  const targetId = riotId || (pseudo && pseudo.includes('#') ? pseudo : null);
+
+  if (!puuid && targetId) {
+    const [gameName, tagLine] = targetId.split('#');
+    try {
+      puuid = await getPuuidByRiotId(gameName, tagLine);
+    } catch (err) {
+      console.error(`[API] PUUID fetch failed: ${err.message}`);
+    }
   }
-  
-  const smurfId = db.addSmurf(userId, puuid, pseudo, username || '', password || '');
-  
-  // Lancer un refresh automatique pour le nouveau smurf
-  updateSingleSmurf(smurfId).catch(err => console.error('Auto-refresh error:', err));
-  
+
+  // 2. If we still don't have a PUUID, we can't add the account
+  if (!puuid) {
+    return res.status(400).json({ error: 'Impossible de trouver ce compte Riot (vérifiez le Pseudo#Tag)' });
+  }
+
+  // 3. Ensure we have a display name
+  if (!pseudo) pseudo = targetId || 'Unknown';
+
+  // 4. Check if account already exists for this user
+  const existing = db.getUserSmurfs(userId).find(s => s.puuid === puuid);
+  if (existing) {
+    return res.status(409).json({ error: 'Ce compte est déjà ajouté' });
+  }
+
+  // 5. Add to DB (no username/password anymore)
+  const smurfId = db.addSmurf(userId, puuid, pseudo, '', '');
+
+  // 6. Trigger initial update
+  scheduler.enqueue(smurfId);
+
   const smurf = db.getSmurfById(smurfId);
   res.status(201).json(smurf);
 });
@@ -80,25 +106,47 @@ router.post('/', requireAuth, async (req, res) => {
 router.delete('/:id', requireAuth, (req, res) => {
   const userId = req.session.user_id;
   const smurfId = parseInt(req.params.id);
-  
   const success = db.deleteSmurf(smurfId, userId);
-  if (success) {
-    res.json({ message: 'Smurf supprimé' });
-  } else {
-    res.status(404).json({ error: 'Smurf non trouvé' });
-  }
+  success ? res.json({ message: 'Smurf supprimé' }) : res.status(404).json({ error: 'Smurf non trouvé' });
 });
 
+
+// === WORKER / SCHEDULER ===
+// Queue simple pour traiter les smurfs un par un
+const scheduler = {
+  queue: [],
+  processing: false,
+  enqueue(smurfId) {
+    if (!this.queue.includes(smurfId)) {
+      this.queue.push(smurfId);
+      this.process();
+    }
+  },
+  async process() {
+    if (this.processing || this.queue.length === 0) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const id = this.queue.shift();
+      try {
+        await updateSingleSmurf(id);
+      } catch (e) { console.error(e); }
+    }
+
+    this.processing = false;
+  }
+};
+
 /**
- * Met à jour un seul smurf (utilisé pour refresh ciblé)
+ * Mise à jour d'un seul smurf
  */
 async function updateSingleSmurf(smurfId) {
   const smurf = db.getSmurfById(smurfId);
   if (!smurf) return;
-  
-  console.log(`\n[UPDATE] ${smurf.pseudo}`);
-  
-  // Extraire gameName et tagLine du pseudo (format "Name#Tag")
+
+  console.log(`[UPDATE] ${smurf.pseudo} started...`);
+
+  // Extraire gameName et tagLine
   let gameName = null;
   let tagLine = null;
   if (smurf.pseudo && smurf.pseudo.includes('#')) {
@@ -106,61 +154,45 @@ async function updateSingleSmurf(smurfId) {
     gameName = parts[0];
     tagLine = parts[1];
   }
-  
+
   let currentPuuid = smurf.puuid;
-  
+
   try {
-    // 1. Level + Rank (avec auto-correction du PUUID si erreur 400)
+    // 1. Level + Tier
     const [levelResult, rankData] = await Promise.all([
       getSummonerLevel(currentPuuid, gameName, tagLine),
       getRankData(currentPuuid)
     ]);
-    
-    // Si le PUUID a été corrigé, le mettre à jour
+
     if (levelResult.corrected && levelResult.puuid !== currentPuuid) {
-      console.log(`   [FIX] PUUID corrige pour ${smurf.pseudo}`);
       currentPuuid = levelResult.puuid;
-      // Mettre à jour le PUUID en base
       db.updateSmurfPuuid(smurfId, currentPuuid);
     }
-    
+
     const level = levelResult.level;
     const { soloq, flex } = formatRank(rankData);
-    
-    // 2. Stats pour les 4 combinaisons (avec le PUUID corrigé si besoin)
-    // On fait ranked en premier (plus commun), puis all
-    const [matchIds_30_ranked, matchIds_season_ranked] = await Promise.all([
-      getMatchIds(currentPuuid, 'ranked', '30'),
-      getMatchIds(currentPuuid, 'ranked', 'season')
-    ]);
-    
-    const [stats_30_ranked, stats_season_ranked] = await Promise.all([
-      calculateStats(currentPuuid, matchIds_30_ranked),
-      calculateStats(currentPuuid, matchIds_season_ranked)
-    ]);
-    
-    // All games (moins prioritaire, on peut skip si peu de matchs ranked)
-    let stats_30_all = null;
-    let stats_season_all = null;
-    
-    const [matchIds_30_all, matchIds_season_all] = await Promise.all([
-      getMatchIds(currentPuuid, 'all', '30'),
-      getMatchIds(currentPuuid, 'all', 'season')
-    ]);
-    
-    [stats_30_all, stats_season_all] = await Promise.all([
-      calculateStats(currentPuuid, matchIds_30_all),
-      calculateStats(currentPuuid, matchIds_season_all)
-    ]);
-    
-    // 3. Sauvegarder
-    db.updateSmurfData(smurfId, {
+
+    // 2. Ranked Matches (30 days & Season)
+    // NOTE: On réduit la charge en demandant un par un
+    // RateLimiter handle le spacing
+
+    const matchIds_30_ranked = await getMatchIds(currentPuuid, 'ranked', '30');
+    const stats_30_ranked = await calculateStats(currentPuuid, matchIds_30_ranked);
+
+    // On ne fait que Ranked 30 days pour le moment pour aller plus vite,
+    // ou alors on accepte que ce soit lent
+    // On va faire Season Ranked aussi
+    const matchIds_season_ranked = await getMatchIds(currentPuuid, 'ranked', 'season');
+    const stats_season_ranked = await calculateStats(currentPuuid, matchIds_season_ranked);
+
+    // Skip "ALL" queues for performance unless explicitly requested later?
+    // Let's keep it minimal: Ranked is what matters most
+    const stats_30_all = null;
+    const stats_season_all = null;
+
+    // 3. Preparer update object
+    const updateData = {
       level,
-      soloq_tier: soloq.tier,
-      soloq_rank: soloq.rank,
-      soloq_lp: soloq.lp,
-      soloq_wins: soloq.wins,
-      soloq_losses: soloq.losses,
       flex_tier: flex.tier,
       flex_rank: flex.rank,
       flex_lp: flex.lp,
@@ -170,81 +202,80 @@ async function updateSingleSmurf(smurfId) {
       stats_30_all,
       stats_season_ranked,
       stats_season_all
-    });
-    
-    console.log(`   [OK] ${smurf.pseudo} - Done`);
-  } catch (err) {
-    console.error(`   [ERROR] ${smurf.pseudo}: ${err.message}`);
-  }
-}
+    };
 
-/**
- * Update tous les smurfs d'un user (avec check cooldown)
- */
-async function updateSmurfsInBackground(userId, force = false) {
-  const smurfs = db.getUserSmurfs(userId);
-  const now = Date.now();
-  
-  console.log(`\n[REFRESH] === User ${userId} (${smurfs.length} smurfs) ===`);
-  
-  for (const smurf of smurfs) {
-    // Check cooldown sauf si force
-    if (!force && smurf.last_updated) {
-      const lastUpdate = new Date(smurf.last_updated).getTime();
-      if (now - lastUpdate < REFRESH_COOLDOWN) {
-        console.log(`[SKIP] ${smurf.pseudo} (updated ${Math.round((now - lastUpdate) / 1000)}s ago)`);
-        continue;
-      }
+    // LOGIQUE DE MEMOIRE DE RANG (Previous Season Fallback)
+    // Si le joueur est Unranked cette saison/split (api renvoie null),
+    // mais qu'on a un rang stocké en DB, on le garde !
+    // Cela permet d'afficher "Diamond 4" de la saison passée au lieu de "Unranked"
+
+    if (soloq.tier) {
+      // Nouveau rang trouvé, on met à jour
+      updateData.soloq_tier = soloq.tier;
+      updateData.soloq_rank = soloq.rank;
+      updateData.soloq_lp = soloq.lp;
+      updateData.soloq_wins = soloq.wins;
+      updateData.soloq_losses = soloq.losses;
+    } else if (smurf.soloq_tier) {
+      // Pas de nouveau rang, mais on en a un en stock -> On touche pas aux champs soloq_*
+      console.log(`   [KEEP] On garde le rang ${smurf.soloq_tier} (Unranked sur l'API)`);
+    } else {
+      // Jamais eu de rang, on met null
+      updateData.soloq_tier = null;
     }
-    
-    await updateSingleSmurf(smurf.id);
+
+    // 4. Update DB
+    db.updateSmurfData(smurfId, updateData);
+
+    console.log(`[UPDATE] ${smurf.pseudo} completed.`);
+  } catch (err) {
+    console.error(`[UPDATE] Error ${smurf.pseudo}: ${err.message}`);
   }
-  
-  console.log(`\n[REFRESH] === DONE ===\n`);
 }
 
 /**
  * POST /api/refresh
+ * Lance la mise à jour en background
  */
 export async function refreshSmurfs(req, res) {
   const userId = req.session?.user_id;
-  
-  if (!userId) {
-    return res.status(401).json({ error: 'Non authentifié' });
-  }
-  
+  if (!userId) return res.status(401).json({ error: 'Non authentifié' });
+
   const { queue = 'ranked', period = '30', force = false } = req.body;
-  
-  console.log(`[REFRESH] Request - user=${userId}, force=${force}`);
-  
-  // Sauvegarder les préférences
+
   db.updateUserPreferences(userId, period, queue);
-  
-  // Lancer en background
-  updateSmurfsInBackground(userId, force);
-  
-  res.status(202).json({ 
-    status: 'Update started in background', 
-    filters: { queue, period } 
+
+  // Ajouter tous les smurfs à la queue du scheduler
+  const smurfs = db.getUserSmurfs(userId);
+  let queuedCount = 0;
+  const now = Date.now();
+
+  for (const s of smurfs) {
+    if (force || !s.last_updated || (now - new Date(s.last_updated).getTime() > REFRESH_COOLDOWN)) {
+      scheduler.enqueue(s.id);
+      queuedCount++;
+    }
+  }
+
+  res.status(202).json({
+    status: 'Background update started',
+    queued: queuedCount,
+    filters: { queue, period }
   });
 }
 
 /**
- * POST /api/smurfs/:id/refresh - Refresh un seul smurf
+ * POST /api/smurfs/:id/refresh
  */
 router.post('/:id/refresh', requireAuth, async (req, res) => {
   const smurfId = parseInt(req.params.id);
-  
-  // Vérifier que le smurf appartient à l'utilisateur
   const smurf = db.getSmurfById(smurfId);
   if (!smurf || smurf.user_id !== req.session.user_id) {
     return res.status(404).json({ error: 'Smurf non trouvé' });
   }
-  
-  // Lancer le refresh en background
-  updateSingleSmurf(smurfId);
-  
-  res.status(202).json({ status: 'Refresh started' });
+
+  scheduler.enqueue(smurfId);
+  res.status(202).json({ status: 'Refresh queued' });
 });
 
 export default router;

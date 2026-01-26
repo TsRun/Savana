@@ -10,37 +10,46 @@
         <span class="level-value">{{ smurf.Level || '?' }}</span>
         <span class="level-label">LVL</span>
       </div>
+      
+      <!-- Sync Status -->
+      <div v-if="smurf.is_syncing" class="sync-status" title="Mise à jour en cours...">
+        <div class="spinner-sm"></div>
+      </div>
     </div>
 
     <!-- Rank Section -->
-    <div class="rank-section">
-      <div class="rank-display">
-        <img 
-          v-if="rankIcon" 
-          :src="rankIcon" 
-          :alt="rankTier" 
-          class="rank-emblem"
-        />
-        <div v-else class="rank-unranked">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
+    <div class="rank-section-container">
+      <div v-for="queue in ['SoloQ', 'Flex']" :key="queue" class="rank-row">
+        <div class="rank-display">
+          <img 
+            v-if="getRankIcon(queue)" 
+            :src="getRankIcon(queue)" 
+            :alt="getRankTier(queue)" 
+            class="rank-emblem"
+            :style="getRankStyle(queue)"
+          />
+          <div v-else class="rank-unranked">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div class="rank-details">
+            <div class="rank-type">{{ queue }}</div>
+            <div class="rank-tier">{{ getRankTier(queue) }}</div>
+            <div class="rank-lp">{{ getRankLP(queue) }} LP</div>
+          </div>
         </div>
-        <div class="rank-details">
-          <div class="rank-tier">{{ rankTier }}</div>
-          <div class="rank-lp">{{ rankLP }} LP</div>
-        </div>
-      </div>
-      <div class="rank-stats">
-        <div class="stat-item">
-          <span class="stat-value" :class="winrateClass">{{ winrate }}%</span>
-          <span class="stat-label">Win Rate</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-value">{{ rankedGames }}</span>
-          <span class="stat-label">Games</span>
+        <div class="rank-stats">
+          <div class="stat-item">
+            <span class="stat-value" :class="getWinrateClass(getWinrate(queue))">{{ getWinrate(queue) }}%</span>
+            <span class="stat-label">WR</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ getGames(queue) }}</span>
+            <span class="stat-label">G</span>
+          </div>
         </div>
       </div>
     </div>
@@ -97,47 +106,35 @@
 
     <!-- Actions Footer -->
     <div class="card-actions">
+
+      
+
+      
       <button 
-        @click="$emit('instant-login', smurf)" 
+        @click="$emit('save-session', smurf)" 
+        class="action-btn"
+        :class="{ 'has-token': smurf.hasSession }"
+        :title="smurf.hasSession ? 'Session déjà sauvegardée (clic pour mettre à jour)' : 'Sauvegarder la session actuelle (RiotGamesPrivateSettings.yaml)'"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+      </button>
+      
+      <button 
+        @click="$emit('load-session', smurf)" 
         class="action-btn primary-action"
-        title="Instant Login"
+        :class="{ disabled: !smurf.hasSession }"
+        :title="smurf.hasSession ? 'Charger la session (Ferme Riot, Nettoie Data, Copie Session)' : 'Aucune session sauvegardée'"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="5 3 19 12 5 21 5 3"/>
+          <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+          <polyline points="10 17 15 12 10 7"/>
+          <line x1="15" y1="12" x2="3" y2="12"/>
         </svg>
-        <span>Play</span>
-      </button>
-      
-      <button 
-        @click="$emit('copy', smurf.UserName, 'Username')" 
-        class="action-btn"
-        title="Copy Username"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
-        </svg>
-      </button>
-      
-      <button 
-        @click="$emit('copy', smurf.Password, 'Password')" 
-        class="action-btn"
-        title="Copy Password"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-          <path d="M7 11V7a5 5 0 0110 0v4"/>
-        </svg>
-      </button>
-      
-      <button 
-        @click="$emit('extract-tokens', smurf)" 
-        class="action-btn"
-        title="Extract Tokens"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-        </svg>
+        <span class="btn-label">Load</span>
       </button>
       
       <button 
@@ -169,7 +166,7 @@ const props = defineProps({
   }
 });
 
-defineEmits(['instant-login', 'copy', 'delete', 'extract-tokens']);
+defineEmits(['copy', 'delete', 'save-session', 'load-session']);
 
 const isHovered = ref(false);
 
@@ -185,40 +182,42 @@ const getTag = computed(() => {
   return parts.length > 1 ? `#${parts[1]}` : '';
 });
 
-const rankData = computed(() => props.smurf.Elo_SoloQ || {});
+const getRankData = (queue) => {
+  return queue === 'Flex' ? (props.smurf.Elo_Flex || {}) : (props.smurf.Elo_SoloQ || {});
+};
 
-const rankIcon = computed(() => {
-  if (!rankData.value.tier) return null;
-  return `/assets/ranks/${rankData.value.tier.toLowerCase()}.png`;
-});
+const getRankIcon = (queue) => {
+  const data = getRankData(queue);
+  if (!data.tier) return null;
+  return `/assets/ranks/${data.tier.toLowerCase()}.png`;
+};
 
-const rankTier = computed(() => {
-  if (!rankData.value.tier) return 'Unranked';
-  return `${rankData.value.tier} ${rankData.value.rank || ''}`;
-});
+const getRankTier = (queue) => {
+  const data = getRankData(queue);
+  if (!data.tier) return 'Unranked';
+  let label = `${data.tier} ${data.rank || ''}`;
+  if (data.is_estimated) label += ' (Est.)';
+  return label;
+};
 
-const rankLP = computed(() => rankData.value.lp || 0);
+const getRankLP = (queue) => {
+  return getRankData(queue).lp || 0;
+};
 
-const winrate = computed(() => {
-  if (!rankData.value.wins && !rankData.value.losses) {
-    return props.smurf.Stats?.winrate || 0;
-  }
-  const total = (rankData.value.wins || 0) + (rankData.value.losses || 0);
+const getWinrate = (queue) => {
+  const data = getRankData(queue);
+  const wins = data.wins || 0;
+  const losses = data.losses || 0;
+  const total = wins + losses;
   if (total === 0) return 0;
-  return Math.round((rankData.value.wins / total) * 100);
-});
+  return Math.round((wins / total) * 100);
+};
 
-const rankedGames = computed(() => {
-  const wins = rankData.value.wins || 0;
-  const losses = rankData.value.losses || 0;
-  return wins + losses;
-});
-
-const winrateClass = computed(() => {
-  if (winrate.value >= 60) return 'wr-high';
-  if (winrate.value >= 50) return 'wr-mid';
+const getWinrateClass = (wr) => {
+  if (wr >= 60) return 'wr-high';
+  if (wr >= 50) return 'wr-mid';
   return 'wr-low';
-});
+};
 
 const kdaClass = computed(() => {
   const kda = props.smurf.Stats?.kda || 0;
@@ -254,11 +253,7 @@ const getChampIcon = (champName) => {
   return `/assets/champions/${name}.png`;
 };
 
-const getWinrateClass = (wr) => {
-  if (wr >= 60) return 'wr-high';
-  if (wr >= 50) return 'wr-mid';
-  return 'wr-low';
-};
+
 </script>
 
 <style scoped>
@@ -268,11 +263,10 @@ const getWinrateClass = (wr) => {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  overflow: hidden;
+  min-height: 400px;
   /* GPU acceleration */
   transform: translateZ(0);
   will-change: transform, box-shadow;
-  contain: layout style;
 }
 
 /* Card Header */
@@ -323,32 +317,46 @@ const getWinrateClass = (wr) => {
 }
 
 /* Rank Section */
-.rank-section {
+.rank-section-container {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 12px;
   padding: var(--space-md);
   background: rgba(255, 255, 255, 0.03);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
 }
 
+.rank-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.rank-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
 .rank-display {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  flex: 1;
 }
 
 .rank-emblem {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   object-fit: contain;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
 }
 
 .rank-unranked {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -356,8 +364,8 @@ const getWinrateClass = (wr) => {
 }
 
 .rank-unranked svg {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
 }
 
 .rank-details {
@@ -365,35 +373,44 @@ const getWinrateClass = (wr) => {
   flex-direction: column;
 }
 
+.rank-type {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
 .rank-tier {
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .rank-lp {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
 .rank-stats {
   display: flex;
-  gap: var(--space-lg);
+  gap: var(--space-md);
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 40px;
 }
 
 .stat-value {
-  font-size: 1.125rem;
+  font-size: 0.9rem;
   font-weight: 700;
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   color: var(--text-muted);
 }
 
@@ -529,33 +546,32 @@ const getWinrateClass = (wr) => {
 /* Actions Footer */
 .card-actions {
   display: flex;
-  gap: var(--space-sm);
+  gap: 8px;
   margin-top: auto;
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--border-subtle);
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .action-btn {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  gap: 4px;
+  padding: 10px 8px;
+  background: rgba(30, 30, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #a1a1aa;
   cursor: pointer;
-  /* GPU-optimized transitions */
-  transition: transform 0.1s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  transform: translateZ(0);
+  transition: all 0.15s ease;
 }
 
 .action-btn:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-  border-color: var(--border-active);
+  background: rgba(50, 50, 65, 0.9);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .action-btn:active {
@@ -563,13 +579,13 @@ const getWinrateClass = (wr) => {
 }
 
 .action-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .action-btn.primary-action {
   flex: 2;
-  background: var(--accent-gradient);
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   border-color: transparent;
   color: white;
   font-weight: 600;
@@ -577,13 +593,67 @@ const getWinrateClass = (wr) => {
 
 .action-btn.primary-action:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px var(--accent-glow);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
 }
 
 .action-btn.danger:hover {
-  background: var(--error);
-  border-color: var(--error);
+  background: #ef4444;
+  border-color: #ef4444;
   color: white;
+}
+
+.action-btn.save-token {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.action-btn.has-token {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #22c55e;
+}
+
+.action-btn.save-token.has-token {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #22c55e;
+}
+
+.action-btn.save-token:hover {
+  background: rgba(34, 197, 94, 0.35);
+  border-color: #22c55e;
+}
+
+.action-btn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.action-btn.restore-token:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.action-btn.restore-token:not(:disabled) {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(139, 92, 246, 0.25));
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #a78bfa;
+}
+
+.action-btn.restore-token:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(139, 92, 246, 0.4));
+  border-color: #8b5cf6;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+}
+
+.btn-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Glow Effect */
@@ -602,5 +672,26 @@ const getWinrateClass = (wr) => {
 
 .card-glow.active {
   opacity: 1;
+}
+
+.sync-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 </style>

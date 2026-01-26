@@ -1,7 +1,26 @@
 import express from 'express';
 import db from '../models/database.js';
-
+import passport from '../config/passport-config.js';
 const router = express.Router();
+// Google OAuth
+// router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+// router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
+//   // Successful authentication
+//   req.session.user_id = req.user.id;
+//   req.session.save();
+//   res.redirect('/'); // redirect to home after login
+// });
+
+// Riot OAuth (generic OAuth2)
+// router.get('/riot', passport.authenticate('riot'));
+// router.get('/riot/callback', passport.authenticate('riot', { failureRedirect: '/login' }), (req, res) => {
+//   req.session.user_id = req.user.id;
+//   req.session.save();
+//   res.redirect('/');
+// });
+
+
+
 
 /**
  * POST /api/auth/register
@@ -9,11 +28,11 @@ const router = express.Router();
  */
 router.post('/register', (req, res) => {
   const { username, password } = req.body;
-  
+
   if (!username || !password) {
     return res.status(400).json({ error: 'Username et password requis' });
   }
-  
+
   const userId = db.createUser(username, password);
   if (userId) {
     req.session.user_id = userId;
@@ -31,16 +50,16 @@ router.post('/register', (req, res) => {
  */
 router.post('/login', (req, res) => {
   const { username, password } = req.body;
-  
+
   const userId = db.authenticateUser(username, password);
   if (userId) {
     req.session.user_id = userId;
     req.session.save();
     console.log(`[AUTH] Login OK - user_id=${userId}`);
-    
+
     const prefs = db.getUserPreferences(userId);
     const userInfo = db.getUserInfo(userId);
-    
+
     return res.json({
       message: 'Connexion réussie',
       user: userInfo,
@@ -68,14 +87,14 @@ router.post('/logout', (req, res) => {
 router.get('/me', (req, res) => {
   const userId = req.session.user_id;
   console.log(`[AUTH] /api/auth/me - user_id: ${userId}`);
-  
+
   if (!userId) {
     return res.status(401).json({ error: 'Non authentifié' });
   }
-  
+
   const userInfo = db.getUserInfo(userId);
   const prefs = db.getUserPreferences(userId);
-  
+
   res.json({
     user: userInfo,
     preferences: prefs

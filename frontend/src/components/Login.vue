@@ -96,6 +96,8 @@
         </button>
       </form>
 
+
+
       <!-- Toggle Mode -->
       <div class="login-footer">
         <p>{{ isRegister ? 'Already have an account?' : "Don't have an account?" }}</p>

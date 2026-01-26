@@ -17,6 +17,8 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      google_id TEXT UNIQUE,
+      riot_id TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -76,6 +78,18 @@ export function initDb() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_smurfs_user ON smurfs(user_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_smurfs_puuid ON smurfs(puuid)');
 
+  // Migration: Ajouter la colonne riot_tokens si elle n'existe pas
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(smurfs)").all();
+    const hasRiotTokens = tableInfo.some(col => col.name === 'riot_tokens');
+    if (!hasRiotTokens) {
+      db.exec('ALTER TABLE smurfs ADD COLUMN riot_tokens TEXT DEFAULT NULL');
+      console.log('[DB] Migration: colonne riot_tokens ajoutee');
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration riot_tokens:', err.message);
+  }
+
   console.log('[DB] Base de donnees initialisee');
 }
 
@@ -92,11 +106,11 @@ function hashPassword(password) {
  * Crée un nouvel utilisateur
  * @returns {number|null} user_id ou null si username existe déjà
  */
-export function createUser(username, password) {
+export function createUser(username, password, googleId = null, riotId = null) {
   try {
     const passwordHash = hashPassword(password);
-    const stmt = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)');
-    const info = stmt.run(username, passwordHash);
+    const stmt = db.prepare('INSERT INTO users (username, password_hash, google_id, riot_id) VALUES (?, ?, ?, ?)');
+    const info = stmt.run(username, passwordHash, googleId, riotId);
     const userId = info.lastInsertRowid;
 
     // Créer les préférences par défaut
@@ -116,12 +130,26 @@ export function createUser(username, password) {
  * Authentifie un utilisateur
  * @returns {number|null} user_id ou null si invalide
  */
+export function findUserByGoogleId(googleId) {
+  const stmt = db.prepare('SELECT id FROM users WHERE google_id = ?');
+  const user = stmt.get(googleId);
+  return user ? user.id : null;
+}
+
+export function findUserByRiotId(riotId) {
+  const stmt = db.prepare('SELECT id FROM users WHERE riot_id = ?');
+  const user = stmt.get(riotId);
+  return user ? user.id : null;
+}
+
 export function authenticateUser(username, password) {
   const passwordHash = hashPassword(password);
   const stmt = db.prepare('SELECT id FROM users WHERE username = ? AND password_hash = ?');
   const user = stmt.get(username, passwordHash);
   return user ? user.id : null;
 }
+
+
 
 /**
  * Récupère les infos d'un utilisateur
@@ -151,7 +179,7 @@ export function addSmurf(userId, puuid, pseudo, username, password) {
 export function getUserSmurfs(userId) {
   const stmt = db.prepare('SELECT * FROM smurfs WHERE user_id = ? ORDER BY created_at DESC');
   const smurfs = stmt.all(userId);
-  
+
   // Parser tous les JSON stats
   return smurfs.map(smurf => ({
     ...smurf,
@@ -218,7 +246,7 @@ export function updateSmurfData(smurfId, data) {
     fields.push('level = ?');
     values.push(data.level);
   }
-  
+
   // Stats pré-calculées
   if (data.stats_30_ranked !== undefined) {
     fields.push('stats_30_ranked = ?');
@@ -317,8 +345,11 @@ export default {
   getUserSmurfs,
   updateSmurfData,
   updateSmurfPuuid,
+  updateSmurfTokens,
   deleteSmurf,
   getSmurfById,
   getUserPreferences,
-  updateUserPreferences
+  updateUserPreferences,
+  findUserByGoogleId,
+  findUserByRiotId
 };

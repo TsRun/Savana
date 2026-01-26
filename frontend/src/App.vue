@@ -64,9 +64,21 @@
             <div class="search-box">
               <input type="text" v-model="searchQuery" placeholder="Search..." class="search-input" />
             </div>
+            
+            <div class="filter-controls" style="display: flex; gap: 8px;">
+              <select v-model="sortBy" class="select-input" @change="handleSortChange">
+                <option value="soloq">Sort: SoloQ</option>
+                <option value="flex">Sort: Flex</option>
+                <option value="level">Sort: Level</option>
+                <option value="name">Sort: Name</option>
+              </select>
+            </div>
             <button @click="refreshElo" :disabled="loading" class="btn btn-ghost">
               <span v-if="loading" class="loading-spinner"></span>
               <span v-else>Refresh</span>
+            </button>
+            <button @click="resetClient" class="btn btn-danger-outline" title="Ferme Riot + LoL et supprime la session active">
+              Reset Client
             </button>
             <button @click="openAddModal" class="btn btn-primary">+ Add</button>
           </div>
@@ -77,10 +89,11 @@
             v-for="smurf in filteredSmurfs" 
             :key="smurf.id || smurf.PUUID"
             :smurf="smurf"
-            @instant-login="handleInstantLogin"
+
             @copy="handleCopy"
             @delete="deleteSmurf"
-            @extract-tokens="openTokenExtractor"
+            @save-session="handleSaveSession"
+            @load-session="handleLoadSession"
           />
         </div>
         <div v-if="filteredSmurfs.length === 0 && !loading" class="empty-state">
@@ -94,6 +107,8 @@
     <div class="toast-container">
       <div v-for="toast in toasts" :key="toast.id" :class="['toast', 'toast-' + toast.type]">{{ toast.message }}</div>
     </div>
+    <TourGuide v-if="isAuthenticated" />
+    <LoadingOverlay />
   </div>
 </template>
 
@@ -102,11 +117,15 @@ import { ref, onMounted, computed } from 'vue';
 import Login from './components/Login.vue';
 import AddSmurfModal from './components/AddSmurfModal.vue';
 import SmurfCard from './components/SmurfCard.vue';
+import TourGuide from './components/TourGuide.vue';
+import LoadingOverlay from './components/LoadingOverlay.vue';
 
 const smurfs = ref([]);
 const loading = ref(false);
 const error = ref(null);
-const sortKey = ref('rank');
+const sortKey = ref('soloq'); // Replaced by sortBy but keeping variable name structure consistent if needed
+const sortBy = ref('soloq');
+
 const searchQuery = ref('');
 const isAuthenticated = ref(false);
 const currentUser = ref(null);
@@ -124,12 +143,54 @@ const API_URL = '/api';
 
 const filteredSmurfs = computed(() => {
   let result = [...smurfs.value];
+  console.log('App: filteredSmurfs calc', result.length, 'smurfs');
+  
+  // Filter
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase();
     result = result.filter(s => s.Pseudo?.toLowerCase().includes(query) || s.UserName?.toLowerCase().includes(query));
   }
+  
+  // Sort
+  const getTierValue = (tier) => {
+    if (!tier) return 0;
+    const tiers = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
+    return tiers.indexOf(tier.toUpperCase()) * 1000;
+  };
+
+  const getDivisionValue = (rank) => {
+    if (!rank) return 0;
+    const divs = { 'I': 400, 'II': 300, 'III': 200, 'IV': 100 };
+    return divs[rank] || 0;
+  };
+
+  const getScore = (smurf, type) => {
+    if (type === 'level') return smurf.Level || 0;
+    if (type === 'name') return smurf.Pseudo || smurf.UserName || '';
+    
+    const data = type === 'flex' ? (smurf.Elo_Flex || {}) : (smurf.Elo_SoloQ || {});
+    if (!data.tier) return -1; // Unranked at bottom
+    
+    return getTierValue(data.tier) + getDivisionValue(data.rank) + (data.lp || 0);
+  };
+
+  result.sort((a, b) => {
+    const valA = getScore(a, sortBy.value);
+    const valB = getScore(b, sortBy.value);
+
+    if (sortBy.value === 'name') {
+      return valA.localeCompare(valB);
+    }
+    
+    return valB - valA; // Descending for everything else
+  });
+
   return result;
 });
+
+const handleSortChange = () => {
+    // console.log("Sorted by " + sortBy.value);
+};
 
 const showToast = (message, type = 'info') => {
   const id = Date.now();
@@ -166,7 +227,23 @@ const fetchSmurfs = async () => {
   try {
     const res = await fetch(API_URL + '/smurfs', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed');
-    smurfs.value = await res.json();
+    const data = await res.json();
+    
+    // Si on est dans Electron, vérifier les sessions sauvegardées
+    if (window.electronAPI?.isElectron) {
+      try {
+        const savedIds = await window.electronAPI.getSavedSessions();
+        smurfs.value = data.map(s => ({
+          ...s,
+          hasSession: savedIds.includes(String(s.id))
+        }));
+      } catch (e) {
+        console.error('Error checking sessions:', e);
+        smurfs.value = data;
+      }
+    } else {
+      smurfs.value = data;
+    }
   } catch (e) { error.value = "Could not load accounts."; }
 };
 
@@ -180,8 +257,41 @@ const refreshElo = async () => {
   } catch (e) { error.value = e.message; loading.value = false; }
 };
 
+const resetClient = async () => {
+  if (!confirm('Voulez-vous réinitialiser le client ?\n\nCela va fermer Riot/League et supprimer la session active.')) return;
+  
+  showToast('Réinitialisation...', 'info');
+  try {
+    if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
+    
+    const res = await window.electronAPI.resetRiotClient();
+    
+    if (!res.success) throw new Error(res.error || 'Erreur inconnue');
+    
+    showToast('Client réinitialisé', 'success');
+  } catch (e) {
+    showToast('Echec: ' + e.message, 'error');
+  }
+};
+
 const openAddModal = () => { showAddModal.value = true; };
 const handleSmurfAdded = async () => { await fetchSmurfs(); showToast('Account added!', 'success'); };
+
+const handleCopy = async (text, type) => {
+  try {
+    if (!text) throw new Error('Texte vide');
+    
+    if (window.electronAPI?.writeToClipboard) {
+      window.electronAPI.writeToClipboard(text);
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
+    showToast(type + ' copied!', 'success');
+  } catch (e) {
+    console.error('Copy error:', e);
+    showToast('Failed to copy ' + type, 'error');
+  }
+};
 
 const deleteSmurf = async (smurfId) => {
   if (!confirm('Delete?')) return;
@@ -191,31 +301,47 @@ const deleteSmurf = async (smurfId) => {
   } catch (e) { showToast('Failed', 'error'); }
 };
 
-const handleInstantLogin = async (smurf) => {
-  showToast('Logging in...', 'info');
+
+const handleSaveSession = async (smurf) => {
+  showToast('Sauvegarde de la session...', 'info');
   try {
-    if (window.electronAPI?.isElectron) {
-      await window.electronAPI.launchRiotClient(smurf.UserName, smurf.Password);
-      showToast('Launched!', 'success');
-    } else {
-      await navigator.clipboard.writeText(smurf.UserName);
-      showToast('Username copied!', 'info');
-    }
-  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+    if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
+    
+    // Appeler Electron pour sauvegarder le fichier
+    const res = await window.electronAPI.saveSession(smurf.id);
+    
+    if (!res.success) throw new Error(res.error || 'Erreur inconnue');
+    
+    // Mise à jour locale
+    const idx = smurfs.value.findIndex(s => s.id === smurf.id);
+    if (idx !== -1) smurfs.value[idx].hasSession = true;
+    
+    showToast('Session sauvegardée pour ' + (smurf.Pseudo || smurf.UserName), 'success');
+  } catch (e) {
+    showToast('Echec: ' + e.message, 'error');
+  }
 };
 
-const handleCopy = async (text, type) => { await navigator.clipboard.writeText(text); showToast(type + ' copied!', 'success'); };
-
-const openTokenExtractor = async (smurf) => {
-  if (!window.electronAPI?.isElectron) { showToast('Requires desktop app', 'warning'); return; }
-  showToast('Extracting...', 'info');
+const handleLoadSession = async (smurf) => {
+  if (!smurf.hasSession) {
+    showToast('Aucune session sauvegardée pour ce compte.', 'error');
+    return;
+  }
+  
+  if (!confirm('Charger la session pour ' + (smurf.Pseudo || smurf.UserName) + '?\n\nAttention: Riot Client sera fermé de force.')) return;
+  
+  showToast('Chargement de la session...', 'info');
   try {
-    const result = await window.electronAPI.extractRiotTokens();
-    if (result.success) {
-      await fetch('/api/tokens/' + smurf.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tokens: result.tokens }) });
-      showToast('Extracted!', 'success');
-    } else { throw new Error(result.error); }
-  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+    if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
+    
+    const res = await window.electronAPI.loadSession(smurf.id);
+    
+    if (!res.success) throw new Error(res.error || 'Erreur inconnue');
+    
+    showToast('Session chargée ! Vous pouvez lancer Riot.', 'success');
+  } catch (e) {
+    showToast('Echec: ' + e.message, 'error');
+  }
 };
 
 const minimizeWindow = () => window.electronAPI?.minimizeWindow();
@@ -291,4 +417,16 @@ onMounted(() => {
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-muted); }
 .empty-icon { font-size: 4rem; opacity: 0.5; }
 .empty-state h3 { color: var(--text-secondary); font-size: 1.25rem; }
+
+.btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; }
+.btn-primary { background: var(--accent-gradient); color: white; }
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+.btn-ghost:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.btn-danger-outline { background: transparent; color: var(--error); border: 1px solid var(--error); margin-right: 8px; }
+.btn-danger-outline:hover { background: rgba(239, 68, 68, 0.1); }
+.select-input { padding: 8px 12px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; outline: none; font-size: 0.875rem; cursor: pointer; }
+.toggle-btn { background: transparent; color: var(--text-muted); transition: all 0.2s; }
+.toggle-btn:hover { color: var(--text-primary); }
+.toggle-btn.active { background: var(--bg-secondary); color: var(--accent-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
 </style>

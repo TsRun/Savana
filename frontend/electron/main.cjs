@@ -4,7 +4,39 @@ const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const { extractRiotTokens } = require('./riotTokens.cjs');
+const { extractRiotTokens, killRiotClient, getAllPossibleRiotPaths, launchLeague } = require('./riotTokens.cjs');
+const { autoUpdater } = require('electron-updater');
+
+// --- Auto Updater Config ---
+autoUpdater.logger = require('electron-log');
+autoUpdater.logger.transports.file.level = 'info';
+
+function setupAutoUpdater() {
+  autoUpdater.on('checking-for-update', () => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'available', info });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'not-available', info });
+  });
+
+  autoUpdater.on('error', (err) => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'error', error: err.message });
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading', progress: progressObj });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloaded', info });
+    // Ask user or auto restart? For now, auto install on quit
+  });
+}
 
 const execAsync = promisify(exec);
 
@@ -43,7 +75,7 @@ const getHomeDir = () => {
 const RIOT_PATHS = {
   win32: {
     client: 'C:\\Riot Games\\Riot Client\\RiotClientServices.exe',
-    config: process.env.LOCALAPPDATA 
+    config: process.env.LOCALAPPDATA
       ? path.join(process.env.LOCALAPPDATA, 'Riot Games', 'Riot Client', 'Config')
       : path.join(getHomeDir(), 'AppData', 'Local', 'Riot Games', 'Riot Client', 'Config'),
     lockfile: process.env.LOCALAPPDATA
@@ -70,7 +102,7 @@ const RIOT_PATHS = {
 function createWindow() {
   // Sur Linux, utiliser la frame native pour éviter les problèmes de resize
   const isLinux = process.platform === 'linux';
-  
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -102,6 +134,10 @@ function createWindow() {
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+
+    // Init Auto Updater
+    setupAutoUpdater();
+    autoUpdater.checkForUpdatesAndNotify();
   });
 
   // Démarrer le serveur backend (sauf si déjà lancé séparément)
@@ -113,7 +149,7 @@ function createWindow() {
 
   // Toujours charger depuis Vite en dev, ou build en prod
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  
+
   if (isDev) {
     // Attendre que Vite soit prêt
     setTimeout(() => {
@@ -177,6 +213,12 @@ ipcMain.handle('window-close', () => {
   if (mainWindow) mainWindow.close();
 });
 
+ipcMain.handle('write-clipboard', (event, text) => {
+  const { clipboard } = require('electron');
+  clipboard.writeText(text);
+  return { success: true };
+});
+
 // =====================================================
 // RIOT CLIENT INTEGRATION
 // =====================================================
@@ -192,12 +234,12 @@ ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
 
   try {
     console.log('[Riot Client] Recherche du client...');
-    
+
     // Vérifier si le client existe
     let clientExists = false;
     let actualClientPath = riotPath.client;
     let possiblePaths = [riotPath.client];
-    
+
     // Pour Linux/WSL, chercher dans plusieurs emplacements possibles
     if (platform === 'linux') {
       possiblePaths = [
@@ -205,7 +247,7 @@ ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
         path.join(getHomeDir(), '.wine/drive_c/Riot Games/Riot Client/RiotClientServices.exe'),
         '/opt/Riot Games/Riot Client/RiotClientServices.exe'
       ];
-      
+
       for (const testPath of possiblePaths) {
         if (fs.existsSync(testPath)) {
           clientExists = true;
@@ -218,7 +260,7 @@ ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
       clientExists = fs.existsSync(riotPath.client);
       actualClientPath = riotPath.client;
     }
-    
+
     if (!clientExists) {
       throw new Error(`Riot Client non trouve. Chemins testes:\n${possiblePaths.join('\n')}`);
     }
@@ -226,18 +268,18 @@ ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
     // Injecter les credentials dans la config
     await injectCredentialsToConfig(riotPath.config, username, password);
 
-    // Lancer le client
+    // Lancer le client (Juste Riot)
     let command;
     if (platform === 'win32') {
-      command = `"${actualClientPath}" --launch-product=league_of_legends --launch-patchline=live`;
+      command = `"${actualClientPath}"`;
     } else if (platform === 'darwin') {
-      command = `open "${actualClientPath}" --args --launch-product=league_of_legends`;
+      command = `open "${actualClientPath}"`;
     } else if (platform === 'linux') {
       if (actualClientPath.startsWith('/mnt/c/')) {
         const windowsPath = actualClientPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
-        command = `cmd.exe /c start "" "${windowsPath}" --launch-product=league_of_legends --launch-patchline=live`;
+        command = `cmd.exe /c start "" "${windowsPath}"`;
       } else {
-        command = `wine "${actualClientPath}" --launch-product=league_of_legends --launch-patchline=live`;
+        command = `wine "${actualClientPath}"`;
       }
     }
 
@@ -257,117 +299,6 @@ ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
   }
 });
 
-// =====================================================
-// INSTANT LOGIN (Token-based, no password needed)
-// =====================================================
-
-ipcMain.handle('instant-login', async (event, { tokens }) => {
-  const platform = process.platform;
-  const riotPath = RIOT_PATHS[platform];
-
-  if (!riotPath) {
-    throw new Error('Plateforme non supportee');
-  }
-
-  try {
-    console.log('[Instant Login] Injection des tokens...');
-    
-    // Inject tokens into Riot Client config files
-    const success = await injectTokensForInstantLogin(riotPath, tokens);
-    
-    if (!success) {
-      throw new Error('Impossible d\'injecter les tokens');
-    }
-
-    // Find and launch Riot Client
-    let clientPath = riotPath.client;
-    let clientExists = fs.existsSync(clientPath);
-
-    // Check alternate paths for Linux/WSL
-    if (!clientExists && platform === 'linux') {
-      const altPaths = [
-        '/mnt/c/Riot Games/Riot Client/RiotClientServices.exe',
-        path.join(getHomeDir(), '.wine/drive_c/Riot Games/Riot Client/RiotClientServices.exe')
-      ];
-      for (const p of altPaths) {
-        if (fs.existsSync(p)) {
-          clientPath = p;
-          clientExists = true;
-          break;
-        }
-      }
-    }
-
-    if (!clientExists) {
-      throw new Error('Riot Client non trouve');
-    }
-
-    // Launch client
-    let command;
-    if (platform === 'win32') {
-      command = `"${clientPath}" --launch-product=league_of_legends --launch-patchline=live`;
-    } else if (platform === 'darwin') {
-      command = `open "${clientPath}" --args --launch-product=league_of_legends`;
-    } else if (platform === 'linux' && clientPath.startsWith('/mnt/c/')) {
-      const windowsPath = clientPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
-      command = `cmd.exe /c start "" "${windowsPath}" --launch-product=league_of_legends --launch-patchline=live`;
-    }
-
-    if (command) {
-      await execAsync(command);
-      console.log('[Instant Login] Client lance avec tokens injectes');
-    }
-
-    return { success: true, message: 'Instant login reussi' };
-  } catch (error) {
-    console.error('[Instant Login] Erreur:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Inject tokens for instant login
-async function injectTokensForInstantLogin(riotPath, tokens) {
-  try {
-    const dataPath = riotPath.data;
-    
-    // Ensure data directory exists
-    if (!fs.existsSync(dataPath)) {
-      fs.mkdirSync(dataPath, { recursive: true });
-    }
-
-    // Write tokens to a session file that Riot Client can use
-    const sessionFile = path.join(dataPath, 'RiotGamesPrivateSettings.yaml');
-    
-    let yamlContent = '';
-    
-    // Build YAML content with tokens
-    if (tokens.accessToken) {
-      yamlContent += `riot-login:\n`;
-      yamlContent += `    persist:\n`;
-      yamlContent += `        region: EUW\n`;
-      yamlContent += `        session:\n`;
-      yamlContent += `            cookies:\n`;
-      if (tokens.ssid) {
-        yamlContent += `                ssid: "${tokens.ssid}"\n`;
-      }
-      if (tokens.sub) {
-        yamlContent += `                sub: "${tokens.sub}"\n`;
-      }
-    }
-    
-    if (yamlContent) {
-      fs.writeFileSync(sessionFile, yamlContent, 'utf8');
-      console.log('[Instant Login] Session file cree:', sessionFile);
-      return true;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('[Instant Login] Erreur injection tokens:', error);
-    return false;
-  }
-}
-
 // Injection des credentials dans le fichier de config
 async function injectCredentialsToConfig(configPath, username, password) {
   try {
@@ -378,14 +309,14 @@ async function injectCredentialsToConfig(configPath, username, password) {
     };
 
     const configFile = path.join(configPath, 'autofill.json');
-    
+
     if (!fs.existsSync(configPath)) {
       fs.mkdirSync(configPath, { recursive: true });
     }
 
     fs.writeFileSync(configFile, JSON.stringify(autofillConfig, null, 2));
     console.log('[Config] Autofill config creee:', configFile);
-    
+
   } catch (error) {
     console.error('[Config] Erreur:', error);
   }
@@ -395,7 +326,7 @@ async function injectCredentialsToConfig(configPath, username, password) {
 async function autoFillCredentials(username, password) {
   try {
     const robot = require('robotjs');
-    
+
     await sleep(500);
     robot.typeString(username);
     await sleep(300);
@@ -404,7 +335,7 @@ async function autoFillCredentials(username, password) {
     robot.typeString(password);
     await sleep(300);
     robot.keyTap('enter');
-    
+
     console.log('[AutoFill] Credentials remplis');
   } catch (error) {
     console.log('[AutoFill] Non disponible:', error.message);
@@ -416,43 +347,242 @@ function sleep(ms) {
 }
 
 // =====================================================
-// TOKEN EXTRACTION
+// SESSION MANAGEMENT (New Flow)
 // =====================================================
 
-ipcMain.handle('extract-riot-tokens', async () => {
-  try {
-    console.log('[Tokens] Extraction automatique...');
-    const tokens = await extractRiotTokens();
-    
-    if (!tokens || Object.keys(tokens).length === 0) {
-      throw new Error('Aucun token trouve dans Riot Client');
-    }
-    
-    console.log('[Tokens] Extraits:', Object.keys(tokens).join(', '));
-    
-    return {
-      success: true,
-      tokens: tokens,
-      message: `${Object.keys(tokens).length} tokens extraits`
-    };
-  } catch (error) {
-    console.error('[Tokens] Erreur:', error);
-    return {
-      success: false,
-      error: error.message
-    };
+function getSessionDir(smurfId) {
+  const sessionDir = path.join(app.getPath('userData'), 'sessions', String(smurfId));
+  if (!fs.existsSync(sessionDir)) {
+    fs.mkdirSync(sessionDir, { recursive: true });
   }
-});
+  return sessionDir;
+}
 
-ipcMain.handle('inject-riot-tokens', async (event, { smurfId, tokens }) => {
+ipcMain.handle('save-session', async (event, { smurfId }) => {
   try {
-    console.log('[Tokens] Injection pour smurf:', smurfId);
-    return { success: true, message: 'Tokens sauvegardes' };
+    console.log(`[Session] Sauvegarde pour smurf ${smurfId}...`);
+
+    const possiblePaths = getAllPossibleRiotPaths();
+    if (possiblePaths.length === 0) {
+      throw new Error('Aucune installation Riot trouvée');
+    }
+
+    // On cherche le fichier dans le dossier Data
+    let sourcePath = null;
+    for (const p of possiblePaths) {
+      const candidate = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      if (fs.existsSync(candidate)) {
+        sourcePath = candidate;
+        break;
+      }
+    }
+
+    if (!sourcePath) {
+      throw new Error('Fichier RiotGamesPrivateSettings.yaml non trouvé (Lancez Riot Client une fois)');
+    }
+
+    const sessionDir = getSessionDir(smurfId);
+    const destPath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
+
+    fs.copyFileSync(sourcePath, destPath);
+    console.log(`[Session] Sauvegardée dans ${destPath}`);
+
+    return { success: true, message: 'Session sauvegardée' };
   } catch (error) {
-    console.error('[Tokens] Erreur injection:', error);
+    console.error('[Session] Erreur sauvegarde:', error);
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('load-session', async (event, { smurfId }) => {
+  try {
+    console.log(`[Session] Chargement pour smurf ${smurfId}...`);
+
+    const sessionDir = getSessionDir(smurfId);
+    const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
+
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error('Aucune session sauvegardée pour ce compte');
+    }
+
+    const possiblePaths = getAllPossibleRiotPaths();
+    if (possiblePaths.length === 0) {
+      throw new Error('Aucune installation Riot trouvée');
+    }
+
+    // 1. Tuer Riot Client
+    console.log('[Session] Arrêt forcé de Riot Client...');
+    await killRiotClient();
+    await sleep(1000); // Attendre un peu
+
+    // 2. Nettoyer et restaurer pour chaque chemin potentiel (au cas où)
+    // Mais généralement il n'y en a qu'un valide par OS principal
+    let restored = false;
+
+    for (const p of possiblePaths) {
+      const dataDir = p.data;
+
+      if (fs.existsSync(dataDir)) {
+        console.log(`[Session] Nettoyage de ${dataDir}...`);
+
+        // Vider le dossier Data
+        const files = fs.readdirSync(dataDir);
+        for (const file of files) {
+          // On supprime tout sauf peut-être les dossiers si nécessaire ? 
+          // L'utilisateur a dit "clear le dossier... et y copier dedans"
+          // On va supprimer récursivement tout le contenu
+          const curPath = path.join(dataDir, file);
+          try {
+            fs.rmSync(curPath, { recursive: true, force: true });
+          } catch (e) {
+            console.log('Erreur suppression fichier inutile:', e.message);
+          }
+        }
+
+        // Copier le fichier de session
+        console.log('[Session] Injection du fichier session...');
+        fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        restored = true;
+      }
+    }
+
+    if (!restored) {
+      throw new Error('Dossier Data Riot introuvable pour la restauration');
+    }
+
+    // 3. Relancer League of Legends
+    console.log('[Session] Relancement de League of Legends...');
+
+    try {
+      // Pause pour laisser le temps au système de fichiers de se stabiliser
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await launchLeague();
+    } catch (launchErr) {
+      console.error('[Session] Erreur lancement LoL:', launchErr.message);
+      // On ne throw pas ici, car la session est déjà restaurée
+    }
+
+    console.log('[Session] Session chargée et LoL lancé');
+    return { success: true, message: 'Session chargée, lancement de LoL...' };
+
+  } catch (error) {
+    console.error('[Session] Erreur chargement:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-saved-sessions', async () => {
+  try {
+    const sessionsDir = path.join(app.getPath('userData'), 'sessions');
+    if (!fs.existsSync(sessionsDir)) {
+      return [];
+    }
+    const smurfIds = fs.readdirSync(sessionsDir).filter(f => {
+      // On vérifie que c'est un dossier et qu'il contient le yaml
+      const p = path.join(sessionsDir, f);
+      return fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'RiotGamesPrivateSettings.yaml'));
+    });
+    return smurfIds;
+  } catch (error) {
+    console.error('[Session] Erreur listing sessions:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('reset-riot-client', async () => {
+  try {
+    console.log('[Reset] Demande de réinitialisation...');
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Arrêt des processus (5s)...' });
+
+    // 1. Tuer les processus
+    await killRiotClient();
+    await sleep(1000); // Attendre fermeture
+
+    // 2. Trouver et supprimer le fichier de session
+    const possiblePaths = getAllPossibleRiotPaths();
+    let deleted = false;
+
+    for (const p of possiblePaths) {
+      const yamlPath = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      if (fs.existsSync(yamlPath)) {
+        try {
+          console.log('[Reset] Suppression:', yamlPath);
+          fs.rmSync(yamlPath, { force: true });
+          deleted = true;
+        } catch (e) {
+          console.error('[Reset] Erreur suppression:', e);
+        }
+      }
+    }
+
+    // 3. Relancer Riot Client
+    console.log('[Reset] Lancement Riot Client...');
+    // Tentative de résolution du chemin du client
+    let clientPath = '';
+    const platform = process.platform;
+
+    if (platform === 'linux') {
+      const wslPath = '/mnt/c/Riot Games/Riot Client/RiotClientServices.exe';
+      const winePath = path.join(getHomeDir(), '.wine/drive_c/Riot Games/Riot Client/RiotClientServices.exe');
+      const lutrisPath = '/opt/Riot Games/Riot Client/RiotClientServices.exe';
+
+      if (fs.existsSync('/mnt/c/')) {
+        if (fs.existsSync(wslPath)) clientPath = wslPath;
+        else clientPath = wslPath;
+      } else {
+        if (fs.existsSync(winePath)) clientPath = winePath;
+        else if (fs.existsSync(lutrisPath)) clientPath = lutrisPath;
+        else clientPath = winePath;
+      }
+    } else if (platform === 'win32') {
+      clientPath = 'C:\\Riot Games\\Riot Client\\RiotClientServices.exe';
+    } else if (platform === 'darwin') {
+      clientPath = '/Applications/Riot Games/Riot Client.app';
+    }
+
+    console.log('[Reset] Chemin client résolu:', clientPath);
+
+    let command;
+    if (platform === 'win32') {
+      command = `"${clientPath}"`;
+    } else if (platform === 'darwin') {
+      command = `open "${clientPath}"`;
+    } else if (platform === 'linux') {
+      if (clientPath.includes('/mnt/c/')) {
+        const windowsPath = clientPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
+        command = `cmd.exe /c start "" "${windowsPath}"`;
+      } else {
+        command = `wine "${clientPath}"`;
+      }
+    }
+
+    if (command) {
+      console.log('[Reset] Commande launch:', command);
+      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Lancement du client...' });
+
+      try {
+        exec(command);
+
+        // Délai pour laisser le temps au client de s'ouvrir
+        setTimeout(() => {
+          if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+        }, 8000);
+
+      } catch (execErr) {
+        console.error('[Reset] Erreur exec:', execErr);
+        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+      }
+    } else {
+      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+    }
+
+    return { success: true, message: deleted ? 'Client réinitialisé et relancé' : 'Rien à nettoyer, client relancé' };
+  } catch (error) {
+    console.error('[Reset] Erreur:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 
 // =====================================================
 // APP LIFECYCLE
