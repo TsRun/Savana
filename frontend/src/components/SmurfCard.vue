@@ -223,12 +223,17 @@ const rankIcon = computed(() => {
 const rankTier = computed(() => {
   if (!rankData.value.tier) return 'Unranked';
   let label = `${rankData.value.tier} ${rankData.value.rank || ''}`;
+  
+  // Indique si c'est un rang de la saison précédente (is_estimated)
   if (rankData.value.is_estimated) {
-    label += ' (Est.)';
+    label += ' (S14)';
   }
+  
+  // Indique si on affiche le rang d'une autre file
   if (rankModeLabel.value) {
     label += ` ${rankModeLabel.value}`;
   }
+  
   return label;
 });
 

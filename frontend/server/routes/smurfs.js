@@ -15,6 +15,19 @@ function requireAuth(req, res, next) {
 }
 
 /**
+ * POST /api/smurfs/reset-all
+ * Reset all rank and stats data (admin/debug endpoint)
+ */
+router.post('/reset-all', requireAuth, (req, res) => {
+  try {
+    const count = db.resetAllSmurfData();
+    res.json({ success: true, message: `Reset ${count} smurfs data`, count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
  * GET /api/smurfs
  */
 router.get('/', requireAuth, (req, res) => {

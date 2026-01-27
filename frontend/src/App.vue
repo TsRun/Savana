@@ -345,7 +345,7 @@ const handleLoadSession = async (smurf) => {
     return;
   }
   
-  if (!confirm('Charger la session pour ' + (smurf.Pseudo || smurf.UserName) + '?\n\nAttention: Riot Client sera fermé de force.')) return;
+  if (!confirm('Charger la session pour ' + (smurf.Pseudo || smurf.UserName) + '?')) return;
   
   showToast('Chargement de la session...', 'info');
   try {

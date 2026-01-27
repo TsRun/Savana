@@ -336,8 +336,45 @@ export function updateUserPreferences(userId, statsPeriod, statsQueue) {
   stmt.run(userId, statsPeriod, statsQueue);
 }
 
+/**
+ * Reset all rank and stats data for all smurfs (for debugging/maintenance)
+ */
+export function resetAllSmurfData() {
+  const stmt = db.prepare(`
+    UPDATE smurfs SET
+      soloq_tier = NULL,
+      soloq_rank = NULL,
+      soloq_lp = 0,
+      soloq_wins = 0,
+      soloq_losses = 0,
+      flex_tier = NULL,
+      flex_rank = NULL,
+      flex_lp = 0,
+      flex_wins = 0,
+      flex_losses = 0,
+      level = 0,
+      stats_30_ranked = NULL,
+      stats_30_all = NULL,
+      stats_season_ranked = NULL,
+      stats_season_all = NULL,
+      last_updated = NULL
+  `);
+  const info = stmt.run();
+  console.log(`[DB] Reset ${info.changes} smurfs data`);
+  return info.changes;
+}
+
+/**
+ * Close the database connection
+ */
+export function closeDb() {
+  db.close();
+  console.log('[DB] Base de données fermée');
+}
+
 export default {
   initDb,
+  closeDb,
   createUser,
   authenticateUser,
   getUserInfo,
@@ -351,5 +388,6 @@ export default {
   getUserPreferences,
   updateUserPreferences,
   findUserByGoogleId,
-  findUserByRiotId
+  findUserByRiotId,
+  resetAllSmurfData
 };

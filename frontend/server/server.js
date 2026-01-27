@@ -74,11 +74,32 @@ const server = app.listen(PORT, 'localhost', () => {
 });
 
 // Graceful Shutdown
+let isShuttingDown = false;
+
 function shutdown() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   console.log('\n[SERVER] Arrêt en cours...');
+
+  // Force exit after 3 seconds if server.close() hangs
+  const forceExitTimeout = setTimeout(() => {
+    console.log('[SERVER] Force exit (timeout)');
+    process.exit(0);
+  }, 3000);
+
   server.close(() => {
+    clearTimeout(forceExitTimeout);
     console.log('[SERVER] Serveur HTTP fermé.');
-    // db.close() si nécessaire (better-sqlite3 le fait souvent auto, mais on peut forcer)
+
+    // Close database connection
+    try {
+      const { closeDb } = require('./models/database.js');
+      closeDb();
+    } catch (e) {
+      // DB module might already be closed or not imported
+    }
+
     process.exit(0);
   });
 }

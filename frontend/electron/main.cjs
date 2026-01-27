@@ -357,10 +357,73 @@ ipcMain.handle('save-session', async (event, { smurfId }) => {
     return { success: false, error: error.message };
   }
 });
+// Vérifie si Riot/LoL est en cours d'exécution
+async function isRiotRunning() {
+  const platform = process.platform;
+  let command = '';
+
+  if (platform === 'win32') {
+    command = 'tasklist /FI "IMAGENAME eq RiotClientServices.exe" /FI "IMAGENAME eq LeagueClient.exe"';
+  } else if (platform === 'linux' && fs.existsSync('/mnt/c/')) {
+    command = 'tasklist.exe /FI "IMAGENAME eq RiotClientServices.exe" & tasklist.exe /FI "IMAGENAME eq LeagueClient.exe"';
+  } else {
+    command = 'pgrep -f "RiotClientServices|LeagueClient" || true';
+  }
+
+  try {
+    const { stdout } = await execAsync(command);
+    // Si on trouve un des processus, retourne true
+    return stdout.includes('RiotClientServices') || stdout.includes('LeagueClient');
+  } catch {
+    return false;
+  }
+}
+
+// Compte le nombre de processus LeagueClientUxRender
+async function countLeagueClientUxRender() {
+  const platform = process.platform;
+  let command = '';
+
+  if (platform === 'win32') {
+    command = 'tasklist /FI "IMAGENAME eq LeagueClientUxRender.exe"';
+  } else if (platform === 'linux' && fs.existsSync('/mnt/c/')) {
+    command = 'tasklist.exe /FI "IMAGENAME eq LeagueClientUxRender.exe"';
+  } else {
+    command = 'pgrep -c -f LeagueClientUxRender || echo 0';
+  }
+
+  try {
+    const { stdout } = await execAsync(command);
+    // Compte les lignes contenant "LeagueClientUxRender"
+    const matches = (stdout.match(/LeagueClientUxRender/gi) || []).length;
+    return matches;
+  } catch {
+    return 0;
+  }
+}
+
+// Attend que LeagueClientUxRender soit lancé (au moins 2 instances)
+async function waitForLeagueClient(timeoutMs = 60000) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const count = await countLeagueClientUxRender();
+    console.log(`[Session] LeagueClientUxRender count: ${count}`);
+
+    if (count >= 2) {
+      return true;
+    }
+
+    await sleep(1000);
+  }
+
+  return false;
+}
 
 ipcMain.handle('load-session', async (event, { smurfId }) => {
   try {
     console.log(`[Session] Chargement pour smurf ${smurfId}...`);
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Préparation du chargement...' });
 
     const sessionDir = getSessionDir(smurfId);
     const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
@@ -374,13 +437,17 @@ ipcMain.handle('load-session', async (event, { smurfId }) => {
       throw new Error('Aucune installation Riot trouvée');
     }
 
-    // 1. Tuer Riot Client
-    console.log('[Session] Arrêt forcé de Riot Client...');
-    await killRiotClient();
-    await sleep(1000); // Attendre un peu
+    // 1. Vérifier si Riot est déjà en cours et tuer si nécessaire
+    const riotWasRunning = await isRiotRunning();
 
-    // 2. Nettoyer et restaurer pour chaque chemin potentiel (au cas où)
-    // Mais généralement il n'y en a qu'un valide par OS principal
+    if (riotWasRunning) {
+      console.log('[Session] Arrêt forcé de Riot Client...');
+      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Fermeture de Riot Client...' });
+      await killRiotClient();
+      await sleep(1000);
+    }
+
+    // 2. Nettoyer et restaurer
     let restored = false;
 
     for (const p of possiblePaths) {
@@ -388,13 +455,10 @@ ipcMain.handle('load-session', async (event, { smurfId }) => {
 
       if (fs.existsSync(dataDir)) {
         console.log(`[Session] Nettoyage de ${dataDir}...`);
+        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Nettoyage des fichiers temporaires...' });
 
-        // Vider le dossier Data
         const files = fs.readdirSync(dataDir);
         for (const file of files) {
-          // On supprime tout sauf peut-être les dossiers si nécessaire ? 
-          // L'utilisateur a dit "clear le dossier... et y copier dedans"
-          // On va supprimer récursivement tout le contenu
           const curPath = path.join(dataDir, file);
           try {
             fs.rmSync(curPath, { recursive: true, force: true });
@@ -403,8 +467,8 @@ ipcMain.handle('load-session', async (event, { smurfId }) => {
           }
         }
 
-        // Copier le fichier de session
         console.log('[Session] Injection du fichier session...');
+        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Injection de la session...' });
         fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
         restored = true;
       }
@@ -416,21 +480,35 @@ ipcMain.handle('load-session', async (event, { smurfId }) => {
 
     // 3. Relancer League of Legends
     console.log('[Session] Relancement de League of Legends...');
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Lancement de League of Legends...' });
 
     try {
-      // Pause pour laisser le temps au système de fichiers de se stabiliser
       await new Promise(resolve => setTimeout(resolve, 1000));
       await launchLeague();
     } catch (launchErr) {
       console.error('[Session] Erreur lancement LoL:', launchErr.message);
-      // On ne throw pas ici, car la session est déjà restaurée
     }
 
-    console.log('[Session] Session chargée et LoL lancé');
-    return { success: true, message: 'Session chargée, lancement de LoL...' };
+    // 4. Attendre que le client soit complètement lancé (2 instances de LeagueClientUxRender)
+    console.log('[Session] Attente du démarrage du client...');
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Attente du démarrage du client...' });
+
+    const clientStarted = await waitForLeagueClient(60000);
+
+    if (clientStarted) {
+      console.log('[Session] Client League détecté, session prête !');
+    } else {
+      console.log('[Session] Timeout atteint, mais la session est quand même chargée');
+    }
+
+    // Fermer l'overlay
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+
+    return { success: true, message: 'Session chargée, client lancé !' };
 
   } catch (error) {
     console.error('[Session] Erreur chargement:', error);
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: false, error: error.message };
   }
 });
