@@ -72,6 +72,23 @@
                 <option value="level">Sort: Level</option>
                 <option value="name">Sort: Name</option>
               </select>
+              
+              <div class="toggle-group" style="display: flex; background: var(--bg-tertiary); padding: 2px; border-radius: 8px;">
+                <button 
+                  @click="displayRank = 'soloq'" 
+                  class="toggle-btn" 
+                  :class="{ active: displayRank === 'soloq' }"
+                  style="padding: 4px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600;"
+                  title="Show SoloQ Rank"
+                >SoloQ</button>
+                <button 
+                  @click="displayRank = 'flex'" 
+                  class="toggle-btn" 
+                  :class="{ active: displayRank === 'flex' }"
+                  style="padding: 4px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600;"
+                  title="Show Flex Rank"
+                >Flex</button>
+              </div>
             </div>
             <button @click="refreshElo" :disabled="loading" class="btn btn-ghost">
               <span v-if="loading" class="loading-spinner"></span>
@@ -89,7 +106,7 @@
             v-for="smurf in filteredSmurfs" 
             :key="smurf.id || smurf.PUUID"
             :smurf="smurf"
-
+            :displayRank="displayRank"
             @copy="handleCopy"
             @delete="deleteSmurf"
             @save-session="handleSaveSession"
@@ -125,7 +142,7 @@ const loading = ref(false);
 const error = ref(null);
 const sortKey = ref('soloq'); // Replaced by sortBy but keeping variable name structure consistent if needed
 const sortBy = ref('soloq');
-
+const displayRank = ref('soloq');
 const searchQuery = ref('');
 const isAuthenticated = ref(false);
 const currentUser = ref(null);
@@ -143,7 +160,6 @@ const API_URL = '/api';
 
 const filteredSmurfs = computed(() => {
   let result = [...smurfs.value];
-  console.log('App: filteredSmurfs calc', result.length, 'smurfs');
   
   // Filter
   if (searchQuery.value) {
@@ -189,7 +205,8 @@ const filteredSmurfs = computed(() => {
 });
 
 const handleSortChange = () => {
-    // console.log("Sorted by " + sortBy.value);
+    if (sortBy.value === 'flex') displayRank.value = 'flex';
+    if (sortBy.value === 'soloq') displayRank.value = 'soloq';
 };
 
 const showToast = (message, type = 'info') => {

@@ -5,38 +5,6 @@ const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const { extractRiotTokens, killRiotClient, getAllPossibleRiotPaths, launchLeague } = require('./riotTokens.cjs');
-const { autoUpdater } = require('electron-updater');
-
-// --- Auto Updater Config ---
-autoUpdater.logger = require('electron-log');
-autoUpdater.logger.transports.file.level = 'info';
-
-function setupAutoUpdater() {
-  autoUpdater.on('checking-for-update', () => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'checking' });
-  });
-
-  autoUpdater.on('update-available', (info) => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'available', info });
-  });
-
-  autoUpdater.on('update-not-available', (info) => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'not-available', info });
-  });
-
-  autoUpdater.on('error', (err) => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'error', error: err.message });
-  });
-
-  autoUpdater.on('download-progress', (progressObj) => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading', progress: progressObj });
-  });
-
-  autoUpdater.on('update-downloaded', (info) => {
-    if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloaded', info });
-    // Ask user or auto restart? For now, auto install on quit
-  });
-}
 
 const execAsync = promisify(exec);
 
@@ -134,10 +102,6 @@ function createWindow() {
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-
-    // Init Auto Updater
-    setupAutoUpdater();
-    autoUpdater.checkForUpdatesAndNotify();
   });
 
   // Démarrer le serveur backend (sauf si déjà lancé séparément)

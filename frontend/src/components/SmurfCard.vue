@@ -18,38 +18,35 @@
     </div>
 
     <!-- Rank Section -->
-    <div class="rank-section-container">
-      <div v-for="queue in ['SoloQ', 'Flex']" :key="queue" class="rank-row">
-        <div class="rank-display">
-          <img 
-            v-if="getRankIcon(queue)" 
-            :src="getRankIcon(queue)" 
-            :alt="getRankTier(queue)" 
-            class="rank-emblem"
-            :style="getRankStyle(queue)"
-          />
-          <div v-else class="rank-unranked">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-          </div>
-          <div class="rank-details">
-            <div class="rank-type">{{ queue }}</div>
-            <div class="rank-tier">{{ getRankTier(queue) }}</div>
-            <div class="rank-lp">{{ getRankLP(queue) }} LP</div>
-          </div>
+    <div class="rank-section">
+      <div class="rank-display">
+        <img 
+          v-if="rankIcon" 
+          :src="rankIcon" 
+          :alt="rankTier" 
+          class="rank-emblem"
+          :style="rankIconStyle"
+        />
+        <div v-else class="rank-unranked">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
         </div>
-        <div class="rank-stats">
-          <div class="stat-item">
-            <span class="stat-value" :class="getWinrateClass(getWinrate(queue))">{{ getWinrate(queue) }}%</span>
-            <span class="stat-label">WR</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-value">{{ getGames(queue) }}</span>
-            <span class="stat-label">G</span>
-          </div>
+        <div class="rank-details">
+          <div class="rank-tier">{{ rankTier }}</div>
+          <div class="rank-lp">{{ rankLP }} LP</div>
+        </div>
+      </div>
+      <div class="rank-stats">
+        <div class="stat-item">
+          <span class="stat-value" :class="winrateClass">{{ winrate }}%</span>
+          <span class="stat-label">Win Rate</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">{{ rankedGames }}</span>
+          <span class="stat-label">Games</span>
         </div>
       </div>
     </div>
@@ -106,9 +103,6 @@
 
     <!-- Actions Footer -->
     <div class="card-actions">
-
-      
-
       
       <button 
         @click="$emit('save-session', smurf)" 
@@ -163,6 +157,10 @@ const props = defineProps({
   smurf: {
     type: Object,
     required: true
+  },
+  displayRank: {
+    type: String,
+    default: 'soloq' // 'soloq' | 'flex'
   }
 });
 
@@ -182,42 +180,80 @@ const getTag = computed(() => {
   return parts.length > 1 ? `#${parts[1]}` : '';
 });
 
-const getRankData = (queue) => {
-  return queue === 'Flex' ? (props.smurf.Elo_Flex || {}) : (props.smurf.Elo_SoloQ || {});
-};
+// Determine if we need to show a fallback rank
+const primaryRank = computed(() => {
+  if (props.displayRank === 'flex') {
+    return props.smurf.Elo_Flex || {};
+  }
+  return props.smurf.Elo_SoloQ || {};
+});
 
-const getRankIcon = (queue) => {
-  const data = getRankData(queue);
-  if (!data.tier) return null;
-  return `/assets/ranks/${data.tier.toLowerCase()}.png`;
-};
+const altRank = computed(() => {
+  if (props.displayRank === 'flex') {
+    return props.smurf.Elo_SoloQ || {};
+  }
+  return props.smurf.Elo_Flex || {};
+});
 
-const getRankTier = (queue) => {
-  const data = getRankData(queue);
-  if (!data.tier) return 'Unranked';
-  let label = `${data.tier} ${data.rank || ''}`;
-  if (data.is_estimated) label += ' (Est.)';
+const rankData = computed(() => {
+  // If primary rank exists, use it
+  if (primaryRank.value.tier) {
+    return primaryRank.value;
+  }
+  // Fallback to alternate rank if primary is unranked
+  if (altRank.value.tier) {
+    return { ...altRank.value, is_fallback: true };
+  }
+  return {};
+});
+
+const rankModeLabel = computed(() => {
+  if (!rankData.value.tier) return '';
+  if (rankData.value.is_fallback) {
+    return props.displayRank === 'flex' ? '(SoloQ)' : '(Flex)';
+  }
+  return '';
+});
+
+const rankIcon = computed(() => {
+  if (!rankData.value.tier) return null;
+  return `/assets/ranks/${rankData.value.tier.toLowerCase()}.png`;
+});
+
+const rankTier = computed(() => {
+  if (!rankData.value.tier) return 'Unranked';
+  let label = `${rankData.value.tier} ${rankData.value.rank || ''}`;
+  if (rankData.value.is_estimated) {
+    label += ' (Est.)';
+  }
+  if (rankModeLabel.value) {
+    label += ` ${rankModeLabel.value}`;
+  }
   return label;
-};
+});
 
-const getRankLP = (queue) => {
-  return getRankData(queue).lp || 0;
-};
+const rankLP = computed(() => rankData.value.lp || 0);
 
-const getWinrate = (queue) => {
-  const data = getRankData(queue);
-  const wins = data.wins || 0;
-  const losses = data.losses || 0;
-  const total = wins + losses;
+const winrate = computed(() => {
+  if (!rankData.value.wins && !rankData.value.losses) {
+    return props.smurf.Stats?.winrate || 0;
+  }
+  const total = (rankData.value.wins || 0) + (rankData.value.losses || 0);
   if (total === 0) return 0;
-  return Math.round((wins / total) * 100);
-};
+  return Math.round((rankData.value.wins / total) * 100);
+});
 
-const getWinrateClass = (wr) => {
-  if (wr >= 60) return 'wr-high';
-  if (wr >= 50) return 'wr-mid';
+const rankedGames = computed(() => {
+  const wins = rankData.value.wins || 0;
+  const losses = rankData.value.losses || 0;
+  return wins + losses;
+});
+
+const winrateClass = computed(() => {
+  if (winrate.value >= 60) return 'wr-high';
+  if (winrate.value >= 50) return 'wr-mid';
   return 'wr-low';
-};
+});
 
 const kdaClass = computed(() => {
   const kda = props.smurf.Stats?.kda || 0;
@@ -253,7 +289,14 @@ const getChampIcon = (champName) => {
   return `/assets/champions/${name}.png`;
 };
 
-
+const getWinrateClass = (wr) => {
+  if (wr >= 60) return 'wr-high';
+  if (wr >= 50) return 'wr-mid';
+  return 'wr-low';
+};
+const rankIconStyle = computed(() => {
+  return rankData.value.is_estimated ? { opacity: 0.7, filter: 'grayscale(0.5)' } : {};
+});
 </script>
 
 <style scoped>
@@ -317,46 +360,33 @@ const getChampIcon = (champName) => {
 }
 
 /* Rank Section */
-.rank-section-container {
+.rank-section {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
   padding: var(--space-md);
   background: rgba(255, 255, 255, 0.03);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
 }
 
-.rank-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-
-.rank-row:last-child {
-  padding-bottom: 0;
-  border-bottom: none;
-}
-
 .rank-display {
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  flex: 1;
 }
 
 .rank-emblem {
-  width: 64px;
-  height: 64px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  transform: scale(1.1);
 }
 
 .rank-unranked {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -364,8 +394,8 @@ const getChampIcon = (champName) => {
 }
 
 .rank-unranked svg {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
 }
 
 .rank-details {
@@ -373,44 +403,35 @@ const getChampIcon = (champName) => {
   flex-direction: column;
 }
 
-.rank-type {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
 .rank-tier {
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .rank-lp {
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   color: var(--text-secondary);
 }
 
 .rank-stats {
   display: flex;
-  gap: var(--space-md);
+  gap: var(--space-lg);
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 40px;
 }
 
 .stat-value {
-  font-size: 0.9rem;
+  font-size: 1.125rem;
   font-weight: 700;
 }
 
 .stat-label {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 

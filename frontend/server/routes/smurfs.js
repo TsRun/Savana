@@ -61,39 +61,26 @@ router.get('/', requireAuth, (req, res) => {
  */
 router.post('/', requireAuth, async (req, res) => {
   const userId = req.session.user_id;
-  let { puuid, pseudo, riotId } = req.body;
+  let { puuid, pseudo, riotId, username, password } = req.body;
 
-  // 1. If we have a RiotID (Name#Tag), try to get the PUUID automatically
-  // Support both "riotId" (from frontend) or "pseudo" field being Name#Tag
-  const targetId = riotId || (pseudo && pseudo.includes('#') ? pseudo : null);
-
-  if (!puuid && targetId) {
-    const [gameName, tagLine] = targetId.split('#');
+  if (!puuid && riotId && riotId.includes('#')) {
+    const [gameName, tagLine] = riotId.split('#');
     try {
       puuid = await getPuuidByRiotId(gameName, tagLine);
     } catch (err) {
-      console.error(`[API] PUUID fetch failed: ${err.message}`);
+      return res.status(400).json({ error: `Impossible de trouver le compte: ${err.message}` });
     }
   }
 
-  // 2. If we still don't have a PUUID, we can't add the account
-  if (!puuid) {
-    return res.status(400).json({ error: 'Impossible de trouver ce compte Riot (vérifiez le Pseudo#Tag)' });
+  if (!pseudo && riotId) pseudo = riotId;
+
+  if (!puuid || !pseudo) {
+    return res.status(400).json({ error: 'PUUID ou Riot ID requis' });
   }
 
-  // 3. Ensure we have a display name
-  if (!pseudo) pseudo = targetId || 'Unknown';
+  const smurfId = db.addSmurf(userId, puuid, pseudo, username || '', password || '');
 
-  // 4. Check if account already exists for this user
-  const existing = db.getUserSmurfs(userId).find(s => s.puuid === puuid);
-  if (existing) {
-    return res.status(409).json({ error: 'Ce compte est déjà ajouté' });
-  }
-
-  // 5. Add to DB (no username/password anymore)
-  const smurfId = db.addSmurf(userId, puuid, pseudo, '', '');
-
-  // 6. Trigger initial update
+  // Prioritize update
   scheduler.enqueue(smurfId);
 
   const smurf = db.getSmurfById(smurfId);
