@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer, clipboard } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // === Utils ===
   writeToClipboard: (text) => ipcRenderer.invoke('write-clipboard', text),
+  getApiConfig: () => ipcRenderer.invoke('get-api-config'),
 
   // === Events ===
   onLaunchStatus: (callback) => ipcRenderer.on('launch-status', (event, ...args) => callback(...args)),
@@ -36,13 +37,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // === Session Management ===
   // Sauvegarder la session actuelle pour le smurf
-  saveSession: (smurfId) => {
-    return ipcRenderer.invoke('save-session', { smurfId });
+  saveSession: (filename) => {
+    return ipcRenderer.invoke('save-session', { filename });
   },
 
   // Charger la session pour le smurf
-  loadSession: (smurfId) => {
-    return ipcRenderer.invoke('load-session', { smurfId });
+  loadSession: (filename) => {
+    return ipcRenderer.invoke('load-session', { filename });
   },
 
   // Lister les sessions sauvegardées

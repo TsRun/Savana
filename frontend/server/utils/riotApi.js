@@ -80,7 +80,12 @@ export async function getPuuidByRiotId(gameName, tagLine) {
     }
     return puuid;
   } catch (err) {
-    console.error(`   [API] Erreur PUUID (${gameName}#${tagLine}): ${err.message}`);
+    if (err.response) {
+      console.error(`   [API ERROR] PUUID fetch failed for ${gameName}#${tagLine} - Status: ${err.response.status}`);
+      console.error(`   [API ERROR] Data:`, err.response.data);
+    } else {
+      console.error(`   [API ERROR] Network/Other: ${err.message}`);
+    }
     return null;
   }
 }
@@ -242,83 +247,11 @@ export async function calculateStats(puuid, matchIds) {
 
 }
 
-async function getEstimatedRank(puuid) {
-  try {
-    // Look back up to 6 months to find a ranked game
-    const matches = await getMatchIds(puuid, 'ranked', 'all');
-    if (!matches || matches.length === 0) return null;
-
-    const lastMatchId = matches[0];
-    const matchDetails = await getMatchDetails(lastMatchId);
-    if (!matchDetails) return null;
-
-    // Filter out the smurf
-    const participants = matchDetails.info.participants.filter(p => p.puuid !== puuid);
-    if (participants.length === 0) return null;
-
-    // Sample size of 3 participants to estimate MMR
-    const sampleSize = Math.min(3, participants.length);
-    let totalScore = 0;
-    let validSamples = 0;
-
-    for (let i = 0; i < sampleSize; i++) {
-      const p = participants[i];
-      // Direct call to avoid circular dependency or complex recursion
-      const url = `https://${REGION_HOST}/lol/league/v4/entries/by-puuid/${p.puuid}`;
-      try {
-        const response = await safeRequest(url);
-        const data = response.data || [];
-        const solo = data.find(e => e.queueType === 'RANKED_SOLO_5x5');
-        if (solo && solo.tier) {
-          const score = TIERS_ORDER.indexOf(solo.tier);
-          if (score !== -1) {
-            totalScore += score;
-            validSamples++;
-          }
-        }
-      } catch (e) { /* ignore individual failures */ }
-    }
-
-    if (validSamples === 0) return null;
-
-    const avgScore = Math.floor(totalScore / validSamples);
-    return {
-      tier: TIERS_ORDER[avgScore],
-      rank: 'IV', // Placeholder
-      lp: 0,
-      is_estimated: true
-    };
-  } catch (err) {
-    console.error(`[API] Estimated Rank Error: ${err.message}`);
-    return null;
-  }
-}
-
 export async function getRankData(puuid) {
   try {
     const url = `https://${REGION_HOST}/lol/league/v4/entries/by-puuid/${puuid}`;
     const response = await safeRequest(url);
     const data = response.data || [];
-
-    // Check if SoloQ exists
-    const hasSolo = data.some(e => e.queueType === 'RANKED_SOLO_5x5');
-
-    if (!hasSolo) {
-      console.log(`[API] Unranked detected for ${puuid}, attempting to find estimated rank...`);
-      const estimated = await getEstimatedRank(puuid);
-      if (estimated) {
-        data.push({
-          queueType: 'RANKED_SOLO_5x5',
-          tier: estimated.tier,
-          rank: estimated.rank,
-          leaguePoints: estimated.lp,
-          wins: 0,
-          losses: 0,
-          is_estimated: true
-        });
-      }
-    }
-
     return data;
   } catch (err) {
     return [];

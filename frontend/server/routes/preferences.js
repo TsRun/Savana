@@ -7,17 +7,21 @@ const router = express.Router();
  * PUT /api/preferences
  * Met à jour les préférences utilisateur
  */
+/**
+ * PUT /api/preferences
+ * Met à jour les préférences utilisateur
+ */
 router.put('/', (req, res) => {
   const userId = req.session.user_id;
-  
+
   if (!userId) {
     return res.status(401).json({ error: 'Non authentifié' });
   }
-  
-  const { stats_period, stats_queue } = req.body;
-  
-  db.updateUserPreferences(userId, stats_period, stats_queue);
-  
+
+  const { stats_period, stats_queue, tour_completed } = req.body;
+
+  db.updateUserPreferences(userId, stats_period, stats_queue, tour_completed);
+
   res.json({ message: 'Préférences mises à jour' });
 });
 

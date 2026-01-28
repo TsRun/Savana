@@ -1,90 +1,79 @@
-# Savana
+# Savana - League of Legends Account Manager
 
-**Savana** est une application desktop moderne pour gérer et suivre vos comptes League of Legends avec statistiques automatiques via l'API Riot.
+Savana is a modern, secure, and efficient desktop application for managing multiple League of Legends accounts. It allows instant switching between accounts (smurfs) without entering passwords, tracks ranked statistics, and manages Riot Client sessions seamlessly.
 
-![Electron](https://img.shields.io/badge/Electron-47848F?style=flat&logo=electron&logoColor=white)
-![Vue.js](https://img.shields.io/badge/Vue.js-4FC08D?style=flat&logo=vue.js&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
+## 🚀 Features
 
-## Fonctionnalités
+*   **Instant Login**: Switch accounts in 1 click (Session Injection + Riot Client automation).
+*   **Session Persistence**: Sessions are saved by Account Name (Pseudo) locally. First launch requires password, subsequent launches are automatic.
+*   **Rank Tracking**: 
+    *   Automatic fetching of SoloQ/Flex ranks via Riot API.
+    *   **"Last Season" Memory**: If an account is currently Unranked, Savana remembers and displays its last known rank from the database.
+    *   No more "Estimated" fake ranks.
+*   **Secure Storage**: Credentials and sessions are stored locally on your machine.
+*   **Unified Architecture**: A single Express backend serves the Vue frontend, packaged neatly within Electron.
+*   **Production Ready**: DevTools disabled in production, auto-updates supported.
 
-- **Multi-comptes** : Gérez tous vos comptes LoL en un seul endroit
-- **Stats automatiques** : Ranks, KDA, Winrate, Champions préférés
-- **Filtres avancés** : 30 jours / Saison, Ranked / All games
-- **Interface moderne** : Design sombre, animations fluides
-- **Cross-platform** : Windows, Linux, macOS
+## 🛠 Tech Stack
 
-## Installation
+*   **Frontend**: Vue 3 + Vite + TailwindCSS
+*   **Backend**: Node.js (Express) + SQLite (sql.js)
+*   **Desktop**: Electron (with secure Preload scripts)
+*   **Build**: Electron Builder
 
-### Prérequis
+## 📦 Installation & Setup
 
-- Node.js 18+
-- Clé API Riot Games ([developer.riotgames.com](https://developer.riotgames.com))
+### Prerequisites
+*   Node.js (v18+)
+*   npm
 
-### Démarrage rapide
+### Development
+
+1.  **Install dependencies**:
+    ```bash
+    cd frontend
+    npm install
+    ```
+
+2.  **Environment Variables**:
+    Create a `.env` file in the root (or `frontend/.env`) with:
+    ```env
+    RIOT_API_KEY=RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    SECRET_KEY=your-secret-key
+    ```
+
+3.  **Run in Dev Mode**:
+    ```bash
+    npm run electron:dev
+    ```
+    This launches the backend, frontend (Vite), and Electron window with Hot Module Replacement.
+
+### Production Build
+
+To create the `.exe` installer:
 
 ```bash
-# Cloner le repo
-git clone https://github.com/TsRun/Savana.git
-cd Savana
-
-# Configurer l'environnement
-cp .env.example .env
-# Éditer .env avec votre clé API Riot
-
-# Installer les dépendances
 cd frontend
-npm install
-
-# Lancer l'application
-npm run start
+npm run electron:build
 ```
+The output file (`Savana Setup 2.0.0.exe`) will be in `frontend/release`.
 
-## Scripts disponibles
+## 📂 Project Structure
 
-| Commande | Description |
-|----------|-------------|
-| `npm run start` | Lance l'app Electron complète |
-| `npm run dev:fullstack` | Lance backend + frontend (sans Electron) |
-| `npm run dev` | Frontend uniquement (Vite) |
-| `npm run server` | Backend uniquement (Node.js) |
-| `npm run electron:build` | Build pour production |
+*   `frontend/src`: Vue frontend code.
+*   `frontend/server`: Express backend code (API, Database, Riot Utils).
+*   `frontend/electron`: Electron main and preload scripts.
+*   `frontend/release`: Output directory for builds.
 
-## Stack technique
+## 🧹 Maintenance
 
-- **Frontend** : Vue.js 3 + Vite
-- **Backend** : Node.js + Express
-- **Database** : SQLite (better-sqlite3)
-- **Desktop** : Electron
-- **API** : Riot Games API
-- **Style** : Tailwind CSS
+*   **Reset Ranks**: To wipe all local rank data (set everyone to Unranked):
+    ```bash
+    node frontend/server/scripts/cleanup_ranks.js
+    ```
+*   **Clean Build**: Delete `dist`, `release`, and `backend-dist` folders.
 
-## Configuration
+## 📝 Notes
 
-Créer un fichier `.env` à la racine du projet :
-
-```env
-RIOT_API_KEY=RGAPI-votre-cle-ici
-SECRET_KEY=votre-secret-session
-```
-
-## Structure du projet
-
-```
-Savana/
-├── frontend/
-│   ├── src/           # Vue.js components
-│   ├── server/        # Express backend
-│   ├── electron/      # Electron main process
-│   └── public/        # Assets statiques
-├── .env               # Configuration (non versionné)
-└── README.md
-```
-
-## Licence
-
-MIT License - Voir [LICENSE](LICENSE)
-
----
-
-**Développé par TsRun**
+*   **Sessions**: Stored in `%AppData%\Savana\sessions`.
+*   **Database**: Stored in `%AppData%\Savana\smurfs.db` (Production) or local folder (Dev).

@@ -35,14 +35,17 @@
           </svg>
         </div>
         <div class="rank-details">
-          <div class="rank-tier">{{ rankTier }}</div>
+          <div class="rank-tier">
+            {{ rankTier }}
+            <span v-if="isPreviousSeason" class="prev-season-badge" title="Classement de la saison précédente">Last Season</span>
+          </div>
           <div class="rank-lp">{{ rankLP }} LP</div>
         </div>
       </div>
       <div class="rank-stats">
         <div class="stat-item">
           <span class="stat-value" :class="winrateClass">{{ winrate }}%</span>
-          <span class="stat-label">Win Rate</span>
+          <span class="stat-label">WR</span>
         </div>
         <div class="stat-item">
           <span class="stat-value">{{ rankedGames }}</span>
@@ -53,21 +56,17 @@
 
     <!-- Stats Section -->
     <div class="stats-section" v-if="smurf.Stats">
-      <!-- Main Role -->
-      <div class="role-badge">
+      <!-- Main Role - Icon only with percentage -->
+      <div class="role-badge" v-if="smurf.Stats.main_role" :title="smurf.Stats.main_role">
         <img 
-          v-if="smurf.Stats.main_role" 
           :src="getRoleIcon(smurf.Stats.main_role)" 
           :alt="smurf.Stats.main_role"
           class="role-icon"
         />
-        <div class="role-info">
-          <span class="role-name">{{ smurf.Stats.main_role }}</span>
-          <span class="role-pct">{{ smurf.Stats.role_percentage }}%</span>
-        </div>
+        <span class="role-pct">{{ smurf.Stats.role_percentage }}%</span>
       </div>
 
-      <!-- KDA -->
+      <!-- KDA - Compact -->
       <div class="kda-display">
         <div class="kda-values">
           <span class="kda-kills">{{ smurf.Stats.avg_kills?.toFixed(1) }}</span>
@@ -76,16 +75,15 @@
           <span class="kda-separator">/</span>
           <span class="kda-assists">{{ smurf.Stats.avg_assists?.toFixed(1) }}</span>
         </div>
-        <div class="kda-ratio" :class="kdaClass">{{ smurf.Stats.kda?.toFixed(2) }} KDA</div>
+        <div class="kda-ratio" :class="kdaClass">{{ smurf.Stats.kda?.toFixed(2) }}</div>
       </div>
 
       <!-- Best Champions -->
       <div class="champions-section" v-if="bestChamps.length > 0">
-        <div class="champ-item" v-for="champ in bestChamps" :key="champ.name">
+        <div class="champ-item" v-for="champ in bestChamps" :key="champ.name" :title="champ.name">
           <img :src="getChampIcon(champ.name)" :alt="champ.name" class="champ-icon" />
           <div class="champ-stats">
             <span class="champ-wr" :class="getWinrateClass(champ.winrate)">{{ champ.winrate }}%</span>
-            <span class="champ-games">{{ champ.games }}G</span>
           </div>
         </div>
       </div>
@@ -226,7 +224,7 @@ const rankTier = computed(() => {
   
   // Indique si c'est un rang de la saison précédente (is_estimated)
   if (rankData.value.is_estimated) {
-    label += ' (S14)';
+    label += ' (Last Season)';
   }
   
   // Indique si on affiche le rang d'une autre file
@@ -252,6 +250,11 @@ const rankedGames = computed(() => {
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
   return wins + losses;
+});
+
+// Check if this is a previous season rank (0 games this season)
+const isPreviousSeason = computed(() => {
+  return rankData.value.tier && rankedGames.value === 0;
 });
 
 const winrateClass = computed(() => {
@@ -436,8 +439,21 @@ const rankIconStyle = computed(() => {
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+.prev-season-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.2));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 4px;
+  color: #f59e0b;
+  vertical-align: middle;
 }
 
 .wr-high { color: var(--success); }
@@ -448,68 +464,63 @@ const rankIconStyle = computed(() => {
 .stats-section {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  flex-wrap: wrap;
+  gap: var(--space-sm);
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .role-badge {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  gap: 6px;
+  padding: 6px 10px;
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
+  flex-shrink: 0;
 }
 
 .role-icon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   filter: brightness(0) invert(1);
   opacity: 0.9;
 }
 
-.role-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.role-name {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-primary);
-  text-transform: capitalize;
-}
-
 .role-pct {
-  font-size: 0.625rem;
-  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .kda-display {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: var(--space-sm) var(--space-md);
+  gap: 8px;
+  padding: 6px 10px;
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
+  flex-shrink: 0;
 }
 
 .kda-values {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.875rem;
+  gap: 2px;
+  font-size: 0.8rem;
   font-weight: 600;
 }
 
 .kda-kills { color: var(--success); }
 .kda-deaths { color: var(--error); }
 .kda-assists { color: var(--info); }
-.kda-separator { color: var(--text-muted); }
+.kda-separator { color: var(--text-muted); font-size: 0.7rem; }
 
 .kda-ratio {
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .kda-excellent { color: var(--rank-gold); }
@@ -519,38 +530,29 @@ const rankIconStyle = computed(() => {
 
 .champions-section {
   display: flex;
-  gap: var(--space-sm);
+  gap: 4px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .champ-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .champ-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
   border: 2px solid var(--border-subtle);
   object-fit: cover;
 }
 
 .champ-stats {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-size: 0.625rem;
-}
-
-.champ-wr {
+  font-size: 0.6rem;
   font-weight: 600;
-}
-
-.champ-games {
-  color: var(--text-muted);
 }
 
 /* No Stats */

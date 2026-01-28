@@ -1,0 +1,18 @@
+{
+    "name": "savana-backend",
+    "version": "1.0.0",
+    "bin": "server/server.js",
+    "scripts": {
+        "build": "pkg server/server.js --target node18-win-x64 --output backend-dist/savana-backend.exe"
+    },
+    "pkg": {
+        "scripts": "server/**/*.js",
+        "assets": [
+            "server/views/**/*",
+            "node_modules/sql.js/dist/sql-wasm.wasm"
+        ],
+        "targets": [
+            "node18-win-x64"
+        ]
+    }
+}

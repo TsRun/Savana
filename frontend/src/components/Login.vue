@@ -12,7 +12,7 @@
       <!-- Logo -->
       <div class="login-header">
         <div class="logo-wrapper">
-          <div class="logo-icon-box">SV</div>
+          <img src="/SavanaLogo.jpg" alt="Savana" class="logo-img" />
           <div class="logo-glow"></div>
         </div>
         <h1 class="login-title">Savana</h1>
@@ -126,7 +126,8 @@ const loading = ref(false);
 const error = ref('');
 const showPassword = ref(false);
 
-const API_URL = '/api';
+import { useApi } from '../composables/useApi';
+const { apiUrl } = useApi();
 
 const handleSubmit = async () => {
   loading.value = true;
@@ -134,7 +135,7 @@ const handleSubmit = async () => {
 
   try {
     const endpoint = isRegister.value ? '/auth/register' : '/auth/login';
-    const res = await fetch(`${API_URL}${endpoint}`, {
+    const res = await fetch(`${apiUrl.value}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -257,6 +258,15 @@ const handleSubmit = async () => {
   color: white;
   background: var(--accent-gradient);
   border-radius: var(--radius-lg);
+  position: relative;
+  z-index: 1;
+}
+
+.logo-img {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-lg);
+  object-fit: contain;
   position: relative;
   z-index: 1;
 }

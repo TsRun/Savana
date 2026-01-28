@@ -1,5 +1,4 @@
 import express from 'express';
-import passport from './config/passport-config.js';
 import session from 'express-session';
 import cors from 'cors';
 import { config } from './config.js';
@@ -12,24 +11,22 @@ import riotClientRoutes from './routes/riotClient.js';
 
 const app = express();
 
-// Initialiser la base de données
-initDb();
-
 // Middleware
 app.use(express.json());
 
 // CORS - permettre les cookies
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174'
-  ],
+  origin: true, // Reflète l'origine de la requête (permet file:// et autres)
   credentials: true
 }));
-
-
+// Session Debugging Middleware
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.url}`);
+  console.log('  - Cookie:', req.headers.cookie ? 'Present' : 'Missing');
+  console.log('  - SessionID:', req.sessionID);
+  console.log('  - User:', req.session ? req.session.userId : 'No Session');
+  next();
+});
 
 // Sessions
 app.use(session({
@@ -44,17 +41,34 @@ app.use(session({
   }
 }));
 
-// Sessions (already defined above)
-// Passport initialization
-app.use(passport.initialize());
-app.use(passport.session());
-
 // Routes
+// Routes
+app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/smurfs', smurfsRoutes);
 app.use('/api/preferences', preferencesRoutes);
 app.use('/api/tokens', tokensRoutes);
 app.use('/api/riot-client', riotClientRoutes);
+
+// Servir le Frontend en Production (Unified Server)
+import path from 'path';
+import { fileURLToPath } from 'url';
+const currentFilename = fileURLToPath(import.meta.url);
+const currentDirname = path.dirname(currentFilename);
+
+if (process.env.ELECTRON_MODE) {
+  const frontendPath = path.join(currentDirname, '../frontend');
+  console.log('[SERVER] Static Frontend Path:', frontendPath);
+
+  if (config.port) { // Basic check, but valid: process.env.ELECTRON_MODE is set
+    app.use(express.static(frontendPath));
+    // Fallback SPA (doit être après les routes API)
+    app.get('*', (req, res) => {
+      if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Not Found' });
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    });
+  }
+}
 
 // Route /api/refresh (non nested)
 import { refreshSmurfs } from './routes/smurfs.js';
@@ -65,13 +79,29 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Démarrer le serveur après initialisation de la base de données
+async function startServer() {
+  // Initialiser la base de données (async avec sql.js)
+  await initDb();
+
+  const PORT = process.env.ELECTRON_MODE ? 0 : (config.port || 3000);
+  const server = app.listen(PORT, 'localhost', () => {
+    const assignedPort = server.address().port;
+    console.log(`\n[SERVER] Backend Node.js demarre sur http://localhost:${assignedPort}`);
+    if (process.send) {
+      process.send({ type: 'PORT', port: assignedPort });
+    }
+    console.log(`[DB] Base de donnees: ${config.dbPath}`);
+    console.log(`[API] Riot API Key: ${config.riotApiKey ? 'Configuree [OK]' : 'Manquante [!]'}\n`);
+  });
+
+  return server;
+}
+
 // Démarrer le serveur
-const PORT = config.port;
-const server = app.listen(PORT, 'localhost', () => {
-  console.log(`\n[SERVER] Backend Node.js demarre sur http://localhost:${PORT}`);
-  console.log(`[DB] Base de donnees: ${config.dbPath}`);
-  console.log(`[API] Riot API Key: ${config.riotApiKey ? 'Configuree [OK]' : 'Manquante [!]'}\n`);
-});
+const serverPromise = startServer();
+let server = null;
+serverPromise.then(s => { server = s; });
 
 // Graceful Shutdown
 let isShuttingDown = false;
@@ -88,20 +118,16 @@ function shutdown() {
     process.exit(0);
   }, 3000);
 
-  server.close(() => {
+  if (server) {
+    server.close(() => {
+      clearTimeout(forceExitTimeout);
+      console.log('[SERVER] Serveur HTTP fermé.');
+      process.exit(0);
+    });
+  } else {
     clearTimeout(forceExitTimeout);
-    console.log('[SERVER] Serveur HTTP fermé.');
-
-    // Close database connection
-    try {
-      const { closeDb } = require('./models/database.js');
-      closeDb();
-    } catch (e) {
-      // DB module might already be closed or not imported
-    }
-
     process.exit(0);
-  });
+  }
 }
 
 process.on('SIGINT', shutdown);

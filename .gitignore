@@ -1,26 +1,27 @@
 # Dépendances
 node_modules/
-.venv/
-__pycache__/
+.pnpm-store/
 
-# Base de données
+# Base de données et Sessions (Local)
 *.db
 *.db-journal
+*.sqlite
+sessions/
+storage/
 
 # Environnement - SENSIBLE
 .env
 .env.local
 .env.*.local
-
-# Données sensibles
-Smurfs.json
-smurfs.db
+.env.production
+.env.development
 
 # Logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
+pnpm-debug.log*
 
 # IDE
 .vscode/
@@ -28,21 +29,29 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Build
+# Build & Dist
 dist/
 dist-electron/
+release/
+backend-dist/
 build/
 out/
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+
+# Tests
+coverage/
 
 # Backup
 *.bak
 *_old.*
 *.backup
-
-# Package lock (optionnel)
-package-lock.json

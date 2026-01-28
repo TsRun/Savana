@@ -1,26 +1,7 @@
 import express from 'express';
 import db from '../models/database.js';
-import passport from '../config/passport-config.js';
+
 const router = express.Router();
-// Google OAuth
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
-  // Successful authentication
-  req.session.user_id = req.user.id;
-  req.session.save();
-  res.redirect('/'); // redirect to home after login
-});
-
-// Riot OAuth (generic OAuth2)
-router.get('/riot', passport.authenticate('riot'));
-router.get('/riot/callback', passport.authenticate('riot', { failureRedirect: '/login' }), (req, res) => {
-  req.session.user_id = req.user.id;
-  req.session.save();
-  res.redirect('/');
-});
-
-
-
 
 /**
  * POST /api/auth/register

@@ -1,18 +1,53 @@
-import Database from 'better-sqlite3';
+import initSqlJs from 'sql.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { config } from '../config.js';
 
-const db = new Database(config.dbPath);
+let db = null;
+let SQL = null;
 
-// Active les clés étrangères
-db.pragma('foreign_keys = ON');
+/**
+ * Sauvegarde la base de données sur le disque
+ */
+function saveDatabase() {
+  if (db) {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(config.dbPath, buffer);
+  }
+}
+
+/**
+ * Initialise la connexion à la base de données
+ */
+async function initConnection() {
+  if (db) return db;
+
+  SQL = await initSqlJs();
+
+  // Charger la base de données existante ou en créer une nouvelle
+  if (fs.existsSync(config.dbPath)) {
+    const buffer = fs.readFileSync(config.dbPath);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  // Activer les clés étrangères
+  db.run('PRAGMA foreign_keys = ON');
+
+  return db;
+}
 
 /**
  * Initialise la base de données avec les tables nécessaires
  */
-export function initDb() {
+export async function initDb() {
+  await initConnection();
+
   // Table des utilisateurs
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
@@ -24,7 +59,7 @@ export function initDb() {
   `);
 
   // Table des smurfs
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS smurfs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -65,7 +100,7 @@ export function initDb() {
   `);
 
   // Table des préférences utilisateur
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_id INTEGER PRIMARY KEY,
       stats_period TEXT DEFAULT '30',
@@ -75,21 +110,38 @@ export function initDb() {
   `);
 
   // Index pour performance
-  db.exec('CREATE INDEX IF NOT EXISTS idx_smurfs_user ON smurfs(user_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_smurfs_puuid ON smurfs(puuid)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_user ON smurfs(user_id)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_puuid ON smurfs(puuid)');
 
   // Migration: Ajouter la colonne riot_tokens si elle n'existe pas
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(smurfs)").all();
-    const hasRiotTokens = tableInfo.some(col => col.name === 'riot_tokens');
-    if (!hasRiotTokens) {
-      db.exec('ALTER TABLE smurfs ADD COLUMN riot_tokens TEXT DEFAULT NULL');
-      console.log('[DB] Migration: colonne riot_tokens ajoutee');
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(row => row[1]);
+      if (!columns.includes('riot_tokens')) {
+        db.run('ALTER TABLE smurfs ADD COLUMN riot_tokens TEXT DEFAULT NULL');
+        console.log('[DB] Migration: colonne riot_tokens ajoutee');
+      }
     }
   } catch (err) {
     console.error('[DB] Erreur migration riot_tokens:', err.message);
   }
 
+  // Migration: Ajouter la colonne tour_completed si elle n'existe pas
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(user_preferences)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(row => row[1]);
+      if (!columns.includes('tour_completed')) {
+        db.run('ALTER TABLE user_preferences ADD COLUMN tour_completed INTEGER DEFAULT 0');
+        console.log('[DB] Migration: colonne tour_completed ajoutee');
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration tour_completed:', err.message);
+  }
+
+  saveDatabase();
   console.log('[DB] Base de donnees initialisee');
 }
 
@@ -102,61 +154,49 @@ function hashPassword(password) {
 
 // === USERS ===
 
-/**
- * Crée un nouvel utilisateur
- * @returns {number|null} user_id ou null si username existe déjà
- */
-export function createUser(username, password, googleId = null, riotId = null) {
+export function createUser(username, password) {
   try {
     const passwordHash = hashPassword(password);
-    const stmt = db.prepare('INSERT INTO users (username, password_hash, google_id, riot_id) VALUES (?, ?, ?, ?)');
-    const info = stmt.run(username, passwordHash, googleId, riotId);
-    const userId = info.lastInsertRowid;
+    db.run('INSERT INTO users (username, password_hash) VALUES (?, ?)',
+      [username, passwordHash]);
+
+    const result = db.exec('SELECT last_insert_rowid() as id');
+    const userId = result[0].values[0][0];
 
     // Créer les préférences par défaut
-    const prefStmt = db.prepare('INSERT INTO user_preferences (user_id) VALUES (?)');
-    prefStmt.run(userId);
+    db.run('INSERT INTO user_preferences (user_id) VALUES (?)', [userId]);
 
+    saveDatabase();
     return userId;
   } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT' || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    if (err.message.includes('UNIQUE constraint failed')) {
       return null; // Username déjà existant
     }
     throw err;
   }
 }
 
-/**
- * Authentifie un utilisateur
- * @returns {number|null} user_id ou null si invalide
- */
-export function findUserByGoogleId(googleId) {
-  const stmt = db.prepare('SELECT id FROM users WHERE google_id = ?');
-  const user = stmt.get(googleId);
-  return user ? user.id : null;
-}
-
-export function findUserByRiotId(riotId) {
-  const stmt = db.prepare('SELECT id FROM users WHERE riot_id = ?');
-  const user = stmt.get(riotId);
-  return user ? user.id : null;
-}
 
 export function authenticateUser(username, password) {
   const passwordHash = hashPassword(password);
-  const stmt = db.prepare('SELECT id FROM users WHERE username = ? AND password_hash = ?');
-  const user = stmt.get(username, passwordHash);
-  return user ? user.id : null;
+  const result = db.exec('SELECT id FROM users WHERE username = ? AND password_hash = ?',
+    [username, passwordHash]);
+  if (result.length > 0 && result[0].values.length > 0) {
+    return result[0].values[0][0];
+  }
+  return null;
 }
-
-
 
 /**
  * Récupère les infos d'un utilisateur
  */
 export function getUserInfo(userId) {
-  const stmt = db.prepare('SELECT id, username, created_at FROM users WHERE id = ?');
-  return stmt.get(userId);
+  const result = db.exec('SELECT id, username, created_at FROM users WHERE id = ?', [userId]);
+  if (result.length > 0 && result[0].values.length > 0) {
+    const row = result[0].values[0];
+    return { id: row[0], username: row[1], created_at: row[2] };
+  }
+  return null;
 }
 
 // === SMURFS ===
@@ -165,20 +205,32 @@ export function getUserInfo(userId) {
  * Ajoute un smurf pour un utilisateur
  */
 export function addSmurf(userId, puuid, pseudo, username, password) {
-  const stmt = db.prepare(`
+  db.run(`
     INSERT INTO smurfs (user_id, puuid, pseudo, username, password)
     VALUES (?, ?, ?, ?, ?)
-  `);
-  const info = stmt.run(userId, puuid, pseudo, username, password);
-  return info.lastInsertRowid;
+  `, [userId, puuid, pseudo, username, password]);
+
+  const result = db.exec('SELECT last_insert_rowid() as id');
+  saveDatabase();
+  return result[0].values[0][0];
 }
 
 /**
  * Récupère tous les smurfs d'un utilisateur
  */
 export function getUserSmurfs(userId) {
-  const stmt = db.prepare('SELECT * FROM smurfs WHERE user_id = ? ORDER BY created_at DESC');
-  const smurfs = stmt.all(userId);
+  const result = db.exec('SELECT * FROM smurfs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+
+  if (result.length === 0) return [];
+
+  const columns = result[0].columns;
+  const smurfs = result[0].values.map(row => {
+    const smurf = {};
+    columns.forEach((col, i) => {
+      smurf[col] = row[i];
+    });
+    return smurf;
+  });
 
   // Parser tous les JSON stats
   return smurfs.map(smurf => ({
@@ -269,26 +321,35 @@ export function updateSmurfData(smurfId, data) {
   values.push(smurfId);
 
   const sql = `UPDATE smurfs SET ${fields.join(', ')} WHERE id = ?`;
-  const stmt = db.prepare(sql);
-  stmt.run(...values);
+  db.run(sql, values);
+  saveDatabase();
 }
 
 /**
  * Supprime un smurf
  */
 export function deleteSmurf(smurfId, userId) {
-  const stmt = db.prepare('DELETE FROM smurfs WHERE id = ? AND user_id = ?');
-  const info = stmt.run(smurfId, userId);
-  return info.changes > 0;
+  db.run('DELETE FROM smurfs WHERE id = ? AND user_id = ?', [smurfId, userId]);
+  const changes = db.getRowsModified();
+  saveDatabase();
+  return changes > 0;
 }
 
 /**
  * Récupère un smurf par ID
  */
 export function getSmurfById(smurfId) {
-  const stmt = db.prepare('SELECT * FROM smurfs WHERE id = ?');
-  const smurf = stmt.get(smurfId);
-  if (smurf && smurf.stats) {
+  const result = db.exec('SELECT * FROM smurfs WHERE id = ?', [smurfId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+
+  const columns = result[0].columns;
+  const row = result[0].values[0];
+  const smurf = {};
+  columns.forEach((col, i) => {
+    smurf[col] = row[i];
+  });
+
+  if (smurf.stats) {
     smurf.stats = JSON.parse(smurf.stats);
   }
   return smurf;
@@ -298,18 +359,20 @@ export function getSmurfById(smurfId) {
  * Met à jour les tokens Riot d'un smurf
  */
 export function updateSmurfTokens(smurfId, tokens) {
-  const stmt = db.prepare('UPDATE smurfs SET riot_tokens = ? WHERE id = ?');
-  const info = stmt.run(JSON.stringify(tokens), smurfId);
-  return info.changes > 0;
+  db.run('UPDATE smurfs SET riot_tokens = ? WHERE id = ?', [JSON.stringify(tokens), smurfId]);
+  const changes = db.getRowsModified();
+  saveDatabase();
+  return changes > 0;
 }
 
 /**
  * Met à jour le PUUID d'un smurf (en cas de correction automatique)
  */
 export function updateSmurfPuuid(smurfId, newPuuid) {
-  const stmt = db.prepare('UPDATE smurfs SET puuid = ? WHERE id = ?');
-  const info = stmt.run(newPuuid, smurfId);
-  return info.changes > 0;
+  db.run('UPDATE smurfs SET puuid = ? WHERE id = ?', [newPuuid, smurfId]);
+  const changes = db.getRowsModified();
+  saveDatabase();
+  return changes > 0;
 }
 
 // === PREFERENCES ===
@@ -318,29 +381,51 @@ export function updateSmurfPuuid(smurfId, newPuuid) {
  * Récupère les préférences d'un utilisateur
  */
 export function getUserPreferences(userId) {
-  const stmt = db.prepare('SELECT * FROM user_preferences WHERE user_id = ?');
-  return stmt.get(userId) || { stats_period: '30', stats_queue: 'ranked' };
+  const result = db.exec('SELECT * FROM user_preferences WHERE user_id = ?', [userId]);
+  if (result.length > 0 && result[0].values.length > 0) {
+    const columns = result[0].columns;
+    const row = result[0].values[0];
+    const prefs = {};
+    columns.forEach((col, i) => {
+      prefs[col] = row[i];
+    });
+    // Ensure defaults
+    if (!prefs.stats_period) prefs.stats_period = '30';
+    if (!prefs.stats_queue) prefs.stats_queue = 'ranked';
+    if (prefs.tour_completed === undefined || prefs.tour_completed === null) prefs.tour_completed = 0;
+
+    return prefs;
+  }
+  // Default if not found
+  return { stats_period: '30', stats_queue: 'ranked', tour_completed: 0 };
 }
 
 /**
  * Met à jour les préférences d'un utilisateur
  */
-export function updateUserPreferences(userId, statsPeriod, statsQueue) {
-  const stmt = db.prepare(`
-    INSERT INTO user_preferences (user_id, stats_period, stats_queue)
-    VALUES (?, ?, ?)
+export function updateUserPreferences(userId, statsPeriod, statsQueue, tourCompleted) {
+  const current = getUserPreferences(userId);
+
+  const newPeriod = statsPeriod !== undefined ? statsPeriod : current.stats_period;
+  const newQueue = statsQueue !== undefined ? statsQueue : current.stats_queue;
+  const newTour = tourCompleted !== undefined ? (tourCompleted ? 1 : 0) : current.tour_completed;
+
+  db.run(`
+    INSERT INTO user_preferences (user_id, stats_period, stats_queue, tour_completed)
+    VALUES (?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       stats_period = excluded.stats_period,
-      stats_queue = excluded.stats_queue
-  `);
-  stmt.run(userId, statsPeriod, statsQueue);
+      stats_queue = excluded.stats_queue,
+      tour_completed = excluded.tour_completed
+  `, [userId, newPeriod, newQueue, newTour]);
+  saveDatabase();
 }
 
 /**
  * Reset all rank and stats data for all smurfs (for debugging/maintenance)
  */
 export function resetAllSmurfData() {
-  const stmt = db.prepare(`
+  db.run(`
     UPDATE smurfs SET
       soloq_tier = NULL,
       soloq_rank = NULL,
@@ -359,17 +444,22 @@ export function resetAllSmurfData() {
       stats_season_all = NULL,
       last_updated = NULL
   `);
-  const info = stmt.run();
-  console.log(`[DB] Reset ${info.changes} smurfs data`);
-  return info.changes;
+  const changes = db.getRowsModified();
+  saveDatabase();
+  console.log(`[DB] Reset ${changes} smurfs data`);
+  return changes;
 }
 
 /**
  * Close the database connection
  */
 export function closeDb() {
-  db.close();
-  console.log('[DB] Base de données fermée');
+  if (db) {
+    saveDatabase();
+    db.close();
+    db = null;
+    console.log('[DB] Base de données fermée');
+  }
 }
 
 export default {
@@ -387,7 +477,5 @@ export default {
   getSmurfById,
   getUserPreferences,
   updateUserPreferences,
-  findUserByGoogleId,
-  findUserByRiotId,
   resetAllSmurfData
 };

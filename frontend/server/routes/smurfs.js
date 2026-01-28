@@ -80,8 +80,11 @@ router.post('/', requireAuth, async (req, res) => {
     const [gameName, tagLine] = riotId.split('#');
     try {
       puuid = await getPuuidByRiotId(gameName, tagLine);
+      if (!puuid) {
+        return res.status(404).json({ error: `Compte Riot introuvable : ${gameName}#${tagLine} (Verifiez l'orthographe ou l'API Key)` });
+      }
     } catch (err) {
-      return res.status(400).json({ error: `Impossible de trouver le compte: ${err.message}` });
+      return res.status(400).json({ error: `Erreur API Riot: ${err.message}` });
     }
   }
 

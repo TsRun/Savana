@@ -2,7 +2,7 @@
   <div class="app-container">
     <div class="titlebar" v-if="isElectron">
       <div class="titlebar-title">
-        <span class="titlebar-icon">SV</span>
+        <img src="/SavanaLogo.jpg" alt="Savana" class="titlebar-logo" />
         <span>Savana</span>
       </div>
       <div class="titlebar-controls">
@@ -17,12 +17,13 @@
         </button>
       </div>
     </div>
-    <Login v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
-    <div v-else class="main-layout" :class="{ 'with-titlebar': isElectron }">
+    <div class="content-wrapper" :class="{ 'with-titlebar': isElectron }">
+      <Login v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
+      <div v-else class="main-layout">
       <aside class="sidebar">
         <div class="sidebar-header">
           <div class="logo">
-            <div class="logo-icon-box">SV</div>
+            <img src="/SavanaLogo.jpg" alt="Savana" class="logo-img" />
             <div class="logo-text">
               <span class="logo-title">Savana</span>
               <span class="logo-subtitle">v2.0</span>
@@ -120,11 +121,26 @@
         </div>
       </main>
     </div>
+    </div>
     <AddSmurfModal :isOpen="showAddModal" @close="showAddModal = false" @smurf-added="handleSmurfAdded" />
+    <ConfirmDialog 
+      :isOpen="confirmDialog.isOpen" 
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirmText="confirmDialog.confirmText"
+      :cancelText="confirmDialog.cancelText"
+      :type="confirmDialog.type"
+      @confirm="handleDialogConfirm"
+      @cancel="handleDialogCancel"
+    />
     <div class="toast-container">
       <div v-for="toast in toasts" :key="toast.id" :class="['toast', 'toast-' + toast.type]">{{ toast.message }}</div>
     </div>
-    <TourGuide v-if="isAuthenticated" />
+    <TourGuide 
+        v-if="isAuthenticated && currentUser" 
+        :alreadySeen="tourSeen"
+        @finish="handleTourFinish"
+    />
     <LoadingOverlay />
   </div>
 </template>
@@ -136,6 +152,7 @@ import AddSmurfModal from './components/AddSmurfModal.vue';
 import SmurfCard from './components/SmurfCard.vue';
 import TourGuide from './components/TourGuide.vue';
 import LoadingOverlay from './components/LoadingOverlay.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
 
 const smurfs = ref([]);
 const loading = ref(false);
@@ -149,6 +166,42 @@ const currentUser = ref(null);
 const showAddModal = ref(false);
 const toasts = ref([]);
 
+// Confirm dialog state
+const confirmDialog = ref({
+  isOpen: false,
+  title: '',
+  message: '',
+  confirmText: 'Confirmer',
+  cancelText: 'Annuler',
+  type: 'info',
+  onConfirm: null
+});
+
+const showConfirm = (options) => {
+  return new Promise((resolve) => {
+    confirmDialog.value = {
+      isOpen: true,
+      title: options.title || 'Confirmation',
+      message: options.message || 'Êtes-vous sûr ?',
+      confirmText: options.confirmText || 'Confirmer',
+      cancelText: options.cancelText || 'Annuler',
+      type: options.type || 'info',
+      onConfirm: () => resolve(true)
+    };
+    confirmDialog.value.onCancel = () => resolve(false);
+  });
+};
+
+const handleDialogConfirm = () => {
+  if (confirmDialog.value.onConfirm) confirmDialog.value.onConfirm();
+  confirmDialog.value.isOpen = false;
+};
+
+const handleDialogCancel = () => {
+  if (confirmDialog.value.onCancel) confirmDialog.value.onCancel();
+  confirmDialog.value.isOpen = false;
+};
+
 // Sur Linux on utilise la frame native, donc pas de titlebar custom
 const isElectron = computed(() => {
   const api = window.electronAPI;
@@ -156,7 +209,9 @@ const isElectron = computed(() => {
   // Cacher la titlebar custom sur Linux (frame native)
   return api.platform !== 'linux';
 });
-const API_URL = '/api';
+import { useApi } from './composables/useApi';
+
+const { apiUrl, initApi } = useApi();
 
 const filteredSmurfs = computed(() => {
   let result = [...smurfs.value];
@@ -217,10 +272,10 @@ const showToast = (message, type = 'info') => {
 
 const checkAuth = async () => {
   try {
-    const res = await fetch(API_URL + '/auth/me', { credentials: 'include' });
+    const res = await fetch(apiUrl.value + '/auth/me', { credentials: 'include' });
     if (res.ok) {
       const data = await res.json();
-      currentUser.value = data.user;
+      currentUser.value = { ...data.user, preferences: data.preferences };
       isAuthenticated.value = true;
       await fetchSmurfs();
     }
@@ -229,31 +284,38 @@ const checkAuth = async () => {
 
 const handleLoginSuccess = (data) => {
   isAuthenticated.value = true;
-  currentUser.value = data.user;
+  currentUser.value = { ...data.user, preferences: data.preferences };
   fetchSmurfs();
 };
 
 const logout = async () => {
-  try { await fetch(API_URL + '/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
+  try { await fetch(apiUrl.value + '/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
   isAuthenticated.value = false;
   currentUser.value = null;
   smurfs.value = [];
 };
 
+const getSafeFilename = (pseudo) => {
+  return pseudo.replace(/[^a-zA-Z0-9]/g, '_');
+};
+
 const fetchSmurfs = async () => {
   try {
-    const res = await fetch(API_URL + '/smurfs', { credentials: 'include' });
+    const res = await fetch(apiUrl.value + '/smurfs', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed');
     const data = await res.json();
     
     // Si on est dans Electron, vérifier les sessions sauvegardées
     if (window.electronAPI?.isElectron) {
       try {
-        const savedIds = await window.electronAPI.getSavedSessions();
-        smurfs.value = data.map(s => ({
-          ...s,
-          hasSession: savedIds.includes(String(s.id))
-        }));
+        const savedFilenames = await window.electronAPI.getSavedSessions();
+        smurfs.value = data.map(s => {
+            const safeName = s.Pseudo ? getSafeFilename(s.Pseudo) : null;
+            return {
+                ...s,
+                hasSession: safeName ? savedFilenames.includes(safeName) : false
+            };
+        });
       } catch (e) {
         console.error('Error checking sessions:', e);
         smurfs.value = data;
@@ -269,13 +331,21 @@ const refreshElo = async () => {
   error.value = null;
   showToast('Refreshing...', 'info');
   try {
-    await fetch(API_URL + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: 'ranked' }) });
+    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: 'ranked' }) });
     setTimeout(async () => { await fetchSmurfs(); loading.value = false; showToast('Done!', 'success'); }, 3000);
   } catch (e) { error.value = e.message; loading.value = false; }
 };
 
 const resetClient = async () => {
-  if (!confirm('Voulez-vous réinitialiser le client ?\n\nCela va fermer Riot/League et supprimer la session active.')) return;
+  const confirmed = await showConfirm({
+    title: 'Réinitialiser le client',
+    message: 'Cela va fermer Riot et League of Legends, puis supprimer la session active. Continuer ?',
+    confirmText: 'Réinitialiser',
+    cancelText: 'Annuler',
+    type: 'warning'
+  });
+  
+  if (!confirmed) return;
   
   showToast('Réinitialisation...', 'info');
   try {
@@ -311,11 +381,20 @@ const handleCopy = async (text, type) => {
 };
 
 const deleteSmurf = async (smurfId) => {
-  if (!confirm('Delete?')) return;
+  const confirmed = await showConfirm({
+    title: 'Supprimer le compte',
+    message: 'Êtes-vous sûr de vouloir supprimer ce compte ? Cette action est irréversible.',
+    confirmText: 'Supprimer',
+    cancelText: 'Annuler',
+    type: 'danger'
+  });
+  
+  if (!confirmed) return;
+  
   try {
-    const res = await fetch(API_URL + '/smurfs/' + smurfId, { method: 'DELETE', credentials: 'include' });
-    if (res.ok) { await fetchSmurfs(); showToast('Deleted', 'success'); }
-  } catch (e) { showToast('Failed', 'error'); }
+    const res = await fetch(apiUrl.value + '/smurfs/' + smurfId, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) { await fetchSmurfs(); showToast('Compte supprimé', 'success'); }
+  } catch (e) { showToast('Échec de la suppression', 'error'); }
 };
 
 
@@ -324,14 +403,20 @@ const handleSaveSession = async (smurf) => {
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
     
+    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    if (!filename) throw new Error('Impossible de générer un nom de fichier pour ce compte');
+
     // Appeler Electron pour sauvegarder le fichier
-    const res = await window.electronAPI.saveSession(smurf.id);
-    
+    // On passe filename au lieu de smurfId
+    const res = await window.electronAPI.saveSession(filename); // Pass directly as property expectation? Wait, updated main.cjs expects { filename } object structure or direct arg? 
+    // Checking main.cjs: ipcMain.handle('save-session', async (event, { filename }) ...
+    // So we need to pass object { filename: '...' }
+    // Wait, let's verify how preload exposes it. Usually it's (...args) => ipcRenderer.invoke('save-session', ...args)
+    // If preload matches main usage, we pass object.
+
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
     
-    // Mise à jour locale
-    const idx = smurfs.value.findIndex(s => s.id === smurf.id);
-    if (idx !== -1) smurfs.value[idx].hasSession = true;
+    await fetchSmurfs(); // Refresh state
     
     showToast('Session sauvegardée pour ' + (smurf.Pseudo || smurf.UserName), 'success');
   } catch (e) {
@@ -345,13 +430,27 @@ const handleLoadSession = async (smurf) => {
     return;
   }
   
-  if (!confirm('Charger la session pour ' + (smurf.Pseudo || smurf.UserName) + '?')) return;
+  const confirmed = await showConfirm({
+    title: 'Charger la session',
+    message: `Charger la session pour ${smurf.Pseudo || smurf.UserName} ? Cela va remplacer la session Riot actuelle.`,
+    confirmText: 'Charger',
+    cancelText: 'Annuler',
+    type: 'info'
+  });
+  
+  if (!confirmed) return;
   
   showToast('Chargement de la session...', 'info');
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
     
-    const res = await window.electronAPI.loadSession(smurf.id);
+    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    if (!filename) throw new Error('Impossible de générer un nom de fichier pour ce compte');
+
+    const res = await window.electronAPI.loadSession(filename); // Object passed? Need to check preload implementation or assumption.
+    // Assuming preload is consistent with: saveSession: (filename) => ipcRenderer.invoke('save-session', { filename })
+    // If preload was simply args spreading, then I need to modify preload too or call with object here.
+    // I will check preload in next step to be sure, but for now assuming object passing here to be safe if preload spawns args.
     
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
     
@@ -378,7 +477,18 @@ const startAutoRefresh = () => {
   }, 5 * 60 * 1000); // 5 minutes
 };
 
-onMounted(() => { 
+const handleTourFinish = () => {
+  if (currentUser.value && currentUser.value.preferences) {
+      currentUser.value.preferences.tour_completed = 1;
+  }
+};
+
+const tourSeen = computed(() => {
+    return !!(currentUser.value?.preferences?.tour_completed);
+});
+
+onMounted(async () => { 
+  await initApi();
   checkAuth();
   startAutoRefresh();
 });
@@ -394,16 +504,19 @@ onMounted(() => {
 .titlebar-btn:hover { background: var(--bg-tertiary); }
 .titlebar-btn.close:hover { background: var(--error); color: white; }
 .titlebar-btn svg { width: 10px; height: 10px; }
-.main-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-.main-layout.with-titlebar { flex: 1; }
+.main-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; height: 100%; }
+.content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.content-wrapper.with-titlebar { margin-top: 32px; }
 .sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; }
 .sidebar-header { padding: 24px; border-bottom: 1px solid var(--border-subtle); }
 .logo { display: flex; align-items: center; gap: 16px; }
 .logo-icon-box { width: 40px; height: 40px; background: var(--accent-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem; color: white; }
+.logo-img { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; }
 .logo-text { display: flex; flex-direction: column; }
 .logo-title { font-weight: 700; font-size: 1rem; color: var(--text-primary); }
 .logo-subtitle { font-size: 0.75rem; color: var(--text-muted); }
 .titlebar-icon { width: 24px; height: 24px; background: var(--accent-gradient); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.625rem; color: white; }
+.titlebar-logo { width: 20px; height: 20px; border-radius: 4px; object-fit: contain; }
 .loading-spinner { width: 14px; height: 14px; border: 2px solid var(--text-muted); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .sidebar-nav { flex: 1; padding: 16px; }

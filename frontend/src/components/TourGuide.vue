@@ -5,13 +5,27 @@
       :style="highlightStyle"
     ></div>
     
+    <!-- Demo Card Independent Container -->
+    <div v-if="currentStepData?.showDemo" class="demo-card-container-centered">
+       <div class="demo-card-wrapper">
+         <SmurfCard 
+          :smurf="demoSmurf" 
+          class="tour-demo-card" 
+          :class="{ 'allow-clicks': false }"
+         />
+       </div>
+    </div>
+
     <div 
       class="tour-tooltip" 
       :style="tooltipStyle"
     >
+      <!-- content moved out -->
+
       <div class="tour-header">
         <span class="step-counter">{{ currentStep + 1 }}/{{ steps.length }}</span>
         <h3>{{ currentStepData.title }}</h3>
+        <button class="btn-close" @click="finishTour">×</button>
       </div>
       <p class="tour-content">{{ currentStepData.content }}</p>
       
@@ -35,11 +49,40 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
+import { useApi } from '../composables/useApi';
+import SmurfCard from './SmurfCard.vue';
+
+const { apiUrl } = useApi();
+
+const props = defineProps({
+  alreadySeen: {
+    type: Boolean,
+    default: true
+  }
+});
+
+const emit = defineEmits(['finish']);
 
 const isOpen = ref(false);
 const currentStep = ref(0);
 const targetRect = ref(null);
+
+const demoSmurf = ref({
+  id: 999,
+  Pseudo: 'Faker#T1',
+  Level: 567,
+  Elo_SoloQ: { tier: 'CHALLENGER', rank: 'I', lp: 1250, wins: 200, losses: 150 },
+  Stats: { 
+    winrate: 57, 
+    kda: 4.5, 
+    main_role: 'MID', 
+    role_percentage: 92,
+    avg_kills: 6.2, avg_deaths: 2.1, avg_assists: 5.8,
+    best_champions: [{ name: 'Ahri', winrate: 62 }, { name: 'Azir', winrate: 55 }]
+  },
+  hasSession: false
+});
 
 const steps = [
   {
@@ -57,10 +100,33 @@ const steps = [
     title: 'Ajout de compte',
     content: 'Ajoutez vos comptes smurfs ici. Une fois connectés, vous pourrez sauvegarder leur session pour une reconnexion instantanée sans mot de passe.'
   },
+  // New Steps with Demo Card
   {
-    target: '.smurf-card', 
-    title: 'Vos Comptes',
-    content: 'Chaque carte permet de copier vos identifiants ou de lancer directement le jeu si une session est sauvegardée.'
+    target: '.tour-demo-card', 
+    title: 'Vos Cartes de Compte',
+    content: 'Voici à quoi ressemble un compte ajouté. Vous y voyez votre rang, vos stats (connexion API automatique) et des actions rapides.',
+    showDemo: true
+  },
+  {
+    target: '.tour-demo-card .action-btn.save-token', 
+    title: '1. Sauvegarder la Session',
+    content: 'Une fois connecté au client Riot avec ce compte, cliquez ici pour SAUVEGARDER la session. Une icône verte apparaîtra.',
+    showDemo: true,
+    highlightDemoSelector: '.action-btn:nth-child(1)'
+  },
+  {
+    target: '.tour-demo-card .action-btn.primary-action',
+    title: '2. Charger (Play)',
+    content: 'Le bouton le plus important ! Cliquez sur LOAD pour fermer Riot, nettoyer les traces, injecter la session et lancer le jeu. Connexion automatique !',
+    showDemo: true,
+    highlightDemoSelector: '.action-btn.primary-action'
+  },
+  {
+    target: '.tour-demo-card .action-btn.danger',
+    title: 'Supprimer',
+    content: 'Cliquez ici pour retirer le compte de Savana.',
+    showDemo: true,
+    highlightDemoSelector: '.action-btn.danger'
   }
 ];
 
@@ -89,27 +155,50 @@ const tooltipStyle = computed(() => {
   
   // Position below target by default
   const top = targetRect.value.bottom + 15;
-  const left = targetRect.value.left + (targetRect.value.width / 2) - 150; // Center horiz (300px width)
+  let left = targetRect.value.left + (targetRect.value.width / 2) - 150; // Center horiz (300px width)
+  
+  // Prevent off-screen (Right edge)
+  const maxLeft = window.innerWidth - 320; // 300px width + 20px padding
+  if (left > maxLeft) left = maxLeft;
+  
+  // Prevent off-screen (Left edge)
+  if (left < 20) left = 20;
+
+  // Check if bottom overflow, if so, put on top
+  const isBottomOverflow = top + 200 > window.innerHeight;
+  if (isBottomOverflow) {
+      return {
+          bottom: `${window.innerHeight - targetRect.value.top + 15}px`,
+          left: `${left}px`
+      };
+  }
   
   return {
     top: `${top}px`,
-    left: `${Math.max(20, left)}px` // Prevent off-screen
+    left: `${left}px`
   };
 });
 
 const updateTarget = async () => {
-  const selector = currentStepData.value.target;
-  if (!selector) {
-    targetRect.value = null;
-    return;
-  }
+  const step = currentStepData.value;
   
   await nextTick();
-  const el = document.querySelector(selector);
+  
+  let el;
+  if (step.showDemo) {
+      // If showing demo, we prioritize the internal highlight selector if present, else the card itself
+      if (step.highlightDemoSelector) {
+          el = document.querySelector(step.highlightDemoSelector);
+      } else {
+          el = document.querySelector('.tour-demo-card');
+      }
+  } else if (step.target) {
+      el = document.querySelector(step.target);
+  }
+
   if (el) {
     targetRect.value = el.getBoundingClientRect();
   } else {
-    // If target not found, skip or show centered (fallback)
     targetRect.value = null;
   }
 };
@@ -119,31 +208,45 @@ const nextStep = () => {
     finishTour();
   } else {
     currentStep.value++;
-    updateTarget();
+    setTimeout(updateTarget, 100); 
   }
 };
 
 const prevStep = () => {
   if (currentStep.value > 0) {
     currentStep.value--;
-    updateTarget();
+    setTimeout(updateTarget, 100);
   }
 };
 
-const finishTour = () => {
-  localStorage.setItem('savana_tour_completed', 'true');
+const finishTour = async () => {
+  try {
+     await fetch(`${apiUrl.value}/preferences`, {
+         method: 'PUT',
+         headers: { 'Content-Type': 'application/json' },
+         credentials: 'include',
+         body: JSON.stringify({ tour_completed: true })
+     });
+     emit('finish');
+  } catch (e) {
+      console.error('Failed to save tour completion', e);
+  }
   isOpen.value = false;
 };
 
+// Start tour
 onMounted(() => {
-  // Check if already completed
-  const completed = localStorage.getItem('savana_tour_completed');
-  if (!completed) {
+  if (!props.alreadySeen) {
     setTimeout(() => {
       isOpen.value = true;
       updateTarget();
-    }, 1000); // Wait for UI to settle
+    }, 1500);
   }
+});
+
+// Watch step to update target
+watch(currentStep, () => {
+    updateTarget();
 });
 </script>
 
@@ -203,6 +306,22 @@ onMounted(() => {
   margin: 0;
 }
 
+.btn-close {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  margin-left: auto;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.btn-close:hover {
+  color: white;
+}
+
 .tour-content {
   color: #a1a1aa;
   font-size: 0.9rem;
@@ -245,5 +364,26 @@ onMounted(() => {
 .btn-tour.secondary:hover {
   background: rgba(255, 255, 255, 0.05);
   color: white;
+}
+
+.demo-card-container-centered {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10001;
+  pointer-events: none;
+}
+
+.demo-card-wrapper {
+  margin-bottom: 20px;
+  pointer-events: none; /* Prevent interaction with demo card */
+  transform: scale(0.9);
+  transform-origin: top center;
+}
+
+.tour-demo-card {
+    background: #1e1e24; /* Match tooltip or slightly simpler */
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 </style>

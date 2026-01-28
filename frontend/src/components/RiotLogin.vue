@@ -3,8 +3,8 @@
     <div class="w-full max-w-md">
       <!-- Logo/Header -->
       <div class="text-center mb-8">
-        <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur-xl flex items-center justify-center text-4xl font-bold text-white">
-          SV
+        <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur-xl flex items-center justify-center overflow-hidden">
+          <img src="/SavanaLogo.jpg" alt="Savana" class="w-10 h-10 object-contain" />
         </div>
         <h1 class="text-4xl font-bold text-white mb-2">Savana</h1>
         <p class="text-blue-100">League of Legends Account Manager</p>
@@ -116,7 +116,8 @@ const loading = ref(false)
 
 const emit = defineEmits(['login-success'])
 
-const API_URL = '/api'
+import { useApi } from '../composables/useApi';
+const { apiUrl } = useApi();
 
 const handleLogin = async () => {
   if (!username.value || !password.value) {
@@ -128,7 +129,7 @@ const handleLogin = async () => {
   error.value = ''
 
   try {
-    const res = await fetch(`${API_URL}/auth/login`, {
+    const res = await fetch(`${apiUrl.value}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -164,7 +165,7 @@ const handleRiotClientLogin = async () => {
       
       if (result.success) {
         // Authentifier l'utilisateur avec le token
-        const res = await fetch(`${API_URL}/auth/riot-login`, {
+        const res = await fetch(`${apiUrl.value}/auth/riot-login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',

@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+import forms from '@tailwindcss/forms';
+
 export default {
   content: [
     "./index.html",
@@ -18,7 +20,7 @@ export default {
         'text-secondary': '#424242',
         'divider': '#e1e1e1',
         'accent': '#3f8fd9',
-        
+
         // Dark mode colors
         'dark-surface': '#202020',
         'dark-surface-2': '#2d2d2d',
@@ -54,6 +56,7 @@ export default {
     },
   },
   plugins: [
-    require('@tailwindcss/forms'),
+    forms,
   ],
 }
+
