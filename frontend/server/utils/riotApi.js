@@ -112,6 +112,16 @@ export async function getSummonerLevel(puuid, gameName = null, tagLine = null) {
   }
 }
 
+// Queue IDs Mapping
+const QUEUE_IDS = {
+  'ranked': 420,
+  'flex': 440,
+  'aram': 450,
+  'arena': 1700,
+  'normal': 400, // Draft Pick
+  'quickplay': 490
+};
+
 export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
   const url = `https://${ROUTING_VALUE}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`;
 
@@ -129,11 +139,13 @@ export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
   }
 
   // LIMITATION: On ne récupère que les 20 derniers matchs MAX pour économiser les requêtes
-  // Avec le rate limit actuel, analyser 100 matchs prendrait > 2 minutes.
   const count = 20;
 
   const params = { start: 0, count, startTime };
-  if (queueType === 'ranked') params.queue = 420;
+
+  if (queueType !== 'all' && QUEUE_IDS[queueType]) {
+    params.queue = QUEUE_IDS[queueType];
+  }
 
   try {
     const response = await safeRequest(url, { params });

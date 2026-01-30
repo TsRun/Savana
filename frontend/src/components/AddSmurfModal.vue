@@ -7,6 +7,14 @@
       </div>
       
       <form @submit.prevent="handleSubmit">
+        <div class="import-section">
+          <button type="button" class="btn btn-import" @click="handleImport" :disabled="loading">
+            <span v-if="importing">Détection...</span>
+            <span v-else>📲 Importer la session active</span>
+          </button>
+          <div class="divider"><span>OU</span></div>
+        </div>
+
         <label>Riot ID</label>
         
         <div class="riot-input-container" :class="{ 'focused': isFocused, 'error': errorMessage }">
@@ -57,14 +65,16 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue';
+import { useApi } from '../composables/useApi';
 
 const props = defineProps({
   isOpen: Boolean
 });
 
-const emit = defineEmits(['close', 'smurf-added', 'error']);
+const emit = defineEmits(['close', 'smurf-added', 'error', 'session-saved']);
 
 const loading = ref(false);
+const importing = ref(false);
 const errorMessage = ref('');
 const isFocused = ref(false);
 
@@ -76,7 +86,6 @@ const form = ref({
   tagLine: ''
 });
 
-import { useApi } from '../composables/useApi';
 const { apiUrl } = useApi();
 
 watch(() => props.isOpen, (val) => {
@@ -97,7 +106,7 @@ function handlePaste(e) {
   if (text.includes('#')) {
     const [name, ...rest] = text.split('#');
     form.value.gameName = name;
-    form.value.tagLine = rest.join('#'); // Join rest in case tag has weird chars, though usually unlikely
+    form.value.tagLine = rest.join('#'); 
     nextTick(() => tagInput.value?.focus());
   } else {
     form.value.gameName = text;
@@ -117,6 +126,7 @@ function handleNameInput(e) {
 function handleTagBackspace(e) {
   if (!form.value.tagLine) {
     nameInput.value?.focus();
+    e.preventDefault(); // Prevent deleting the last char of name directly
   }
 }
 
@@ -125,7 +135,47 @@ function close() {
   emit('close');
 }
 
+// Helper for cleaning filename
+const getSafeFilename = (pseudo) => {
+  return pseudo.replace(/[^a-zA-Z0-9]/g, '_');
+};
+
+async function handleImport() {
+  importing.value = true;
+  loading.value = true;
+  errorMessage.value = '';
+
+  try {
+    // 1. Get Current Account from Local Client
+    const res = await fetch(`${apiUrl.value}/riot-client/current-account`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Impossible de détecter le compte. Vérifiez que Riot Client est ouvert.');
+    }
+    
+    const account = await res.json();
+    if (!account.gameName || !account.tagLine) {
+       throw new Error('Pseudo introuvable sur le client. Connectez-vous et réessayez.');
+    }
+
+    form.value.gameName = account.gameName;
+    form.value.tagLine = account.tagLine;
+    
+    // 2. Add to DB
+    await performSubmit(true); // true = autoSaveSession
+
+  } catch (e) {
+    errorMessage.value = e.message;
+    loading.value = false;
+    importing.value = false;
+  }
+}
+
 async function handleSubmit() {
+  await performSubmit(false);
+}
+
+async function performSubmit(autoSaveSession = false) {
   loading.value = true;
   errorMessage.value = '';
   
@@ -138,6 +188,7 @@ async function handleSubmit() {
   }
   
   try {
+    // Add Smurf
     const res = await fetch(`${apiUrl.value}/smurfs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -145,9 +196,28 @@ async function handleSubmit() {
       body: JSON.stringify({ riotId: fullRiotId })
     });
     
+    const data = await res.json();
+    
     if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Erreur lors de l\'ajout');
+      if (res.status === 409 && autoSaveSession) {
+          // If already exists and we are importing, we still want to save session!
+          // Proceed to save session. 
+          // But we need to know the ID? Actually saveSession inputs are just file ops.
+      } else {
+        throw new Error(data.error || 'Erreur lors de l\'ajout');
+      }
+    }
+    
+    // Auto Save Session
+    if (autoSaveSession) {
+       if (!window.electronAPI?.isElectron) throw new Error("Feature disponible uniquement sur l'application Desktop");
+       
+       const filename = getSafeFilename(fullRiotId);
+       const saveRes = await window.electronAPI.saveSession(filename);
+       
+       if (!saveRes.success) throw new Error('Compte ajouté mais erreur sauvegarde session: ' + saveRes.error);
+       
+       emit('session-saved', fullRiotId);
     }
     
     emit('smurf-added');
@@ -156,6 +226,7 @@ async function handleSubmit() {
     errorMessage.value = e.message;
   } finally {
     loading.value = false;
+    importing.value = false;
   }
 }
 </script>
@@ -353,4 +424,57 @@ label {
 }
 
 
+
+.import-section {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.btn-import {
+  width: 100%;
+  padding: 12px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px dashed var(--accent-primary);
+  color: var(--accent-primary);
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-import:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-import:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.divider span {
+  padding: 0 10px;
+}
 </style>

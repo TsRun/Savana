@@ -31,11 +31,20 @@
           </div>
         </div>
         <nav class="sidebar-nav">
-          <a href="#" class="nav-item active">
+          <a href="#" class="nav-item" :class="{ active: currentView === 'accounts' }" @click.prevent="currentView = 'accounts'">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
             </svg>
             <span>Accounts</span>
+          </a>
+          <a href="#" class="nav-item" :class="{ active: currentView === 'friends' }" @click.prevent="showFriendsTab">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 00-3-3.87" />
+              <path d="M16 3.13a4 4 0 010 7.75" />
+            </svg>
+            <span>Friends</span>
           </a>
         </nav>
         <div class="sidebar-footer">
@@ -55,7 +64,9 @@
           </div>
         </div>
       </aside>
-      <main class="main-content">
+
+      <!-- VIEW: ACCOUNTS -->
+      <main v-if="currentView === 'accounts'" class="main-content">
         <header class="content-header">
           <div class="header-left">
             <h1 class="page-title">My Accounts</h1>
@@ -67,6 +78,12 @@
             </div>
             
             <div class="filter-controls" style="display: flex; gap: 8px;">
+              <select v-model="statsQueue" class="select-input" style="width: 120px;" title="Filter Stats by Queue">
+                  <option value="soloq">SoloQ</option>
+                  <option value="flex">Flex</option>
+                  <option value="all">All</option>
+              </select>
+              
               <select v-model="sortBy" class="select-input" @change="handleSortChange">
                 <option value="soloq">Sort: SoloQ</option>
                 <option value="flex">Sort: Flex</option>
@@ -120,9 +137,25 @@
           <button @click="openAddModal" class="btn btn-primary">+ Add Account</button>
         </div>
       </main>
+      
+      <!-- VIEW: FRIENDS -->
+      <main v-if="currentView === 'friends'" class="main-content">
+        <FriendsView 
+          :friends="friends"
+          :smurfs="smurfs"
+          v-model:showSmurfs="showSmurfsInFriends"
+          :loading="loadingFriends"
+          @open-add="showAddFriendModal = true"
+          @delete-friend="handleDeleteFriend"
+          @refresh-friend="handleRefreshFriend"
+          @refresh-smurf="handleRefreshSmurf"
+        />
+      </main>
+
     </div>
     </div>
-    <AddSmurfModal :isOpen="showAddModal" @close="showAddModal = false" @smurf-added="handleSmurfAdded" />
+    <AddSmurfModal :isOpen="showAddModal" @close="showAddModal = false" @smurf-added="handleSmurfAdded" @session-saved="handleSessionSaved" />
+    <AddFriendModal :isOpen="showAddFriendModal" @close="showAddFriendModal = false" @friend-added="fetchFriends" />
     <ConfirmDialog 
       :isOpen="confirmDialog.isOpen" 
       :title="confirmDialog.title"
@@ -149,22 +182,30 @@
 import { ref, onMounted, computed } from 'vue';
 import Login from './components/Login.vue';
 import AddSmurfModal from './components/AddSmurfModal.vue';
+import AddFriendModal from './components/AddFriendModal.vue';
 import SmurfCard from './components/SmurfCard.vue';
+import FriendsView from './components/FriendsView.vue';
 import TourGuide from './components/TourGuide.vue';
 import LoadingOverlay from './components/LoadingOverlay.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 
 const smurfs = ref([]);
+const friends = ref([]);
 const loading = ref(false);
+const loadingFriends = ref(false);
 const error = ref(null);
-const sortKey = ref('soloq'); // Replaced by sortBy but keeping variable name structure consistent if needed
+const sortKey = ref('soloq');
 const sortBy = ref('soloq');
 const displayRank = ref('soloq');
 const searchQuery = ref('');
 const isAuthenticated = ref(false);
 const currentUser = ref(null);
 const showAddModal = ref(false);
+const showAddFriendModal = ref(false);
 const toasts = ref([]);
+const currentView = ref('accounts');
+const showSmurfsInFriends = ref(false);
+const statsQueue = ref('soloq');
 
 // Confirm dialog state
 const confirmDialog = ref({
@@ -245,6 +286,7 @@ const filteredSmurfs = computed(() => {
     return getTierValue(data.tier) + getDivisionValue(data.rank) + (data.lp || 0);
   };
 
+
   result.sort((a, b) => {
     const valA = getScore(a, sortBy.value);
     const valB = getScore(b, sortBy.value);
@@ -256,8 +298,22 @@ const filteredSmurfs = computed(() => {
     return valB - valA; // Descending for everything else
   });
 
-  return result;
+  // Inject Dynamic Stats based on Filter
+  return result.map(s => {
+      const key = `stats_30_${statsQueue.value}`;
+      let statsToShow = null;
+      
+      if (s.stats_json && s.stats_json[key]) {
+          statsToShow = s.stats_json[key];
+      } else if (statsQueue.value === 'soloq') {
+          // Default fallback if json missing but column populated (legacy)
+          statsToShow = s.Stats;
+      }
+      
+      return { ...s, Stats: statsToShow };
+  });
 });
+
 
 const handleSortChange = () => {
     if (sortBy.value === 'flex') displayRank.value = 'flex';
@@ -278,6 +334,7 @@ const checkAuth = async () => {
       currentUser.value = { ...data.user, preferences: data.preferences };
       isAuthenticated.value = true;
       await fetchSmurfs();
+      await fetchFriends();
     }
   } catch (e) { console.error('Auth check failed:', e); }
 };
@@ -286,6 +343,7 @@ const handleLoginSuccess = (data) => {
   isAuthenticated.value = true;
   currentUser.value = { ...data.user, preferences: data.preferences };
   fetchSmurfs();
+  fetchFriends();
 };
 
 const logout = async () => {
@@ -293,6 +351,7 @@ const logout = async () => {
   isAuthenticated.value = false;
   currentUser.value = null;
   smurfs.value = [];
+  friends.value = [];
 };
 
 const getSafeFilename = (pseudo) => {
@@ -326,12 +385,88 @@ const fetchSmurfs = async () => {
   } catch (e) { error.value = "Could not load accounts."; }
 };
 
+// === FRIENDS LOGIC ===
+
+const showFriendsTab = () => {
+  currentView.value = 'friends';
+  fetchFriends();
+};
+
+const fetchFriends = async () => {
+  loadingFriends.value = true;
+  try {
+    const res = await fetch(apiUrl.value + '/friends', { credentials: 'include' });
+    if (res.ok) {
+      friends.value = await res.json();
+    }
+  } catch (e) {
+    console.error('Failed to load friends', e);
+  } finally {
+    loadingFriends.value = false;
+  }
+};
+
+const handleDeleteFriend = async (id) => {
+  try {
+    const res = await fetch(`${apiUrl.value}/friends/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) {
+      showToast('Friend removed', 'success');
+      fetchFriends();
+    }
+  } catch (e) { showToast('Error removing friend', 'error'); }
+};
+
+const handleRefreshFriend = async (payload) => {
+  const friendId = typeof payload === 'object' ? payload.id : payload;
+  const queue = typeof payload === 'object' ? payload.queue : 'soloq';
+  
+  showToast(`Refreshing friend stats (${queue})...`, 'info');
+  try {
+    await fetch(`${apiUrl.value}/friends/${friendId}/refresh`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', 
+      body: JSON.stringify({ queue }) 
+    });
+    setTimeout(() => {
+      fetchFriends();
+      showToast('Friend stats updated', 'success');
+    }, 2000);
+  } catch (e) {
+    showToast('Failed to refresh friend', 'error');
+  }
+};
+
+const handleRefreshSmurf = async (payload) => {
+  const smurfId = typeof payload === 'object' ? payload.id : payload;
+  const queue = typeof payload === 'object' ? payload.queue : 'soloq';
+
+  showToast(`Refreshing smurf stats (${queue})...`, 'info');
+  try {
+    // Note: Assuming /smurfs/:id/refresh also accepts body now.
+    // I need to update smurfs.js route next.
+    await fetch(`${apiUrl.value}/smurfs/${smurfId}/refresh`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue })
+    });
+    setTimeout(() => {
+      fetchSmurfs();
+      showToast('Smurf stats updated', 'success');
+    }, 3000);
+  } catch (e) {
+    showToast('Failed to refresh smurf', 'error');
+  }
+};
+
+
 const refreshElo = async () => {
   loading.value = true;
   error.value = null;
   showToast('Refreshing...', 'info');
   try {
-    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: 'ranked' }) });
+    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value }) });
     setTimeout(async () => { await fetchSmurfs(); loading.value = false; showToast('Done!', 'success'); }, 3000);
   } catch (e) { error.value = e.message; loading.value = false; }
 };
@@ -363,6 +498,7 @@ const resetClient = async () => {
 
 const openAddModal = () => { showAddModal.value = true; };
 const handleSmurfAdded = async () => { await fetchSmurfs(); showToast('Account added!', 'success'); };
+const handleSessionSaved = (riotId) => { showToast(`Session sauvegardée pour ${riotId}`, 'success'); };
 
 const handleCopy = async (text, type) => {
   try {
@@ -470,9 +606,9 @@ let autoRefreshInterval = null;
 const startAutoRefresh = () => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   autoRefreshInterval = setInterval(async () => {
-    if (isAuthenticated.value && smurfs.value.length > 0) {
-      console.log('🔄 Auto-refresh triggered');
-      await fetchSmurfs(); // Juste récupérer les données à jour
+    if (isAuthenticated.value) {
+      if (currentView.value === 'friends') fetchFriends();
+      else fetchSmurfs();
     }
   }, 5 * 60 * 1000); // 5 minutes
 };

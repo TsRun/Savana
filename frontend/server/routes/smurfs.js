@@ -59,7 +59,7 @@ router.get('/', requireAuth, (req, res) => {
       losses: smurf.flex_losses
     } : null,
     Level: smurf.level,
-    Stats: smurf[statsKey],
+    Stats: smurf[statsKey] || (smurf.stats_json && smurf.stats_json[statsKey]) || null,
     last_updated: smurf.last_updated,
     id: smurf.id,
     hasToken: !!smurf.riot_tokens,
@@ -175,62 +175,58 @@ async function updateSingleSmurf(smurfId) {
     const level = levelResult.level;
     const { soloq, flex } = formatRank(rankData);
 
-    // 2. Ranked Matches (30 days & Season)
-    // NOTE: On réduit la charge en demandant un par un
-    // RateLimiter handle le spacing
+    // 2. Stats (Dynamic based on preferences)
+    const prefs = db.getUserPreferences(smurf.user_id);
+    const queue = prefs.stats_queue || 'soloq';
+    const period = prefs.stats_period || '30';
 
-    const matchIds_30_ranked = await getMatchIds(currentPuuid, 'ranked', '30');
-    const stats_30_ranked = await calculateStats(currentPuuid, matchIds_30_ranked);
+    const matchIds = await getMatchIds(currentPuuid, queue, period);
+    const stats = await calculateStats(currentPuuid, matchIds);
 
-    // On ne fait que Ranked 30 days pour le moment pour aller plus vite,
-    // ou alors on accepte que ce soit lent
-    // On va faire Season Ranked aussi
-    const matchIds_season_ranked = await getMatchIds(currentPuuid, 'ranked', 'season');
-    const stats_season_ranked = await calculateStats(currentPuuid, matchIds_season_ranked);
-
-    // Skip "ALL" queues for performance unless explicitly requested later?
-    // Let's keep it minimal: Ranked is what matters most
-    const stats_30_all = null;
-    const stats_season_all = null;
-
-    // 3. Preparer update object
+    // 3. Prepare Update
     const updateData = {
       level,
       flex_tier: flex.tier,
       flex_rank: flex.rank,
       flex_lp: flex.lp,
       flex_wins: flex.wins,
-      flex_losses: flex.losses,
-      stats_30_ranked,
-      stats_30_all,
-      stats_season_ranked,
-      stats_season_all
+      flex_losses: flex.losses
     };
 
-    // LOGIQUE DE MEMOIRE DE RANG (Previous Season Fallback)
-    // Si le joueur est Unranked cette saison/split (api renvoie null),
-    // mais qu'on a un rang stocké en DB, on le garde !
-    // Cela permet d'afficher "Diamond 4" de la saison passée au lieu de "Unranked"
+    // Update Legacy Stats Columns if applicable (for backward compat)
+    if (queue === 'soloq' && period === '30') updateData.stats_30_ranked = stats;
+    if (queue === 'soloq' && period === 'season') updateData.stats_season_ranked = stats;
+    if (queue === 'all' && period === '30') updateData.stats_30_all = stats;
+    if (queue === 'all' && period === 'season') updateData.stats_season_all = stats;
 
+    // Update Dynamic Stats JSON
+    let statsJson = {};
+    try {
+      // smurf.stats_json sent by db is string or null
+      statsJson = smurf.stats_json ? JSON.parse(smurf.stats_json) : {};
+    } catch (e) { }
+
+    const statsKey = `stats_${period}_${queue}`;
+    statsJson[statsKey] = stats;
+    updateData.stats_json = statsJson;
+
+    // LOGIQUE DE MEMOIRE DE RANG (Keep existing rank if new is null)
     if (soloq.tier) {
-      // Nouveau rang trouvé, on met à jour
       updateData.soloq_tier = soloq.tier;
       updateData.soloq_rank = soloq.rank;
       updateData.soloq_lp = soloq.lp;
       updateData.soloq_wins = soloq.wins;
       updateData.soloq_losses = soloq.losses;
     } else if (smurf.soloq_tier) {
-      // Pas de nouveau rang, mais on en a un en stock -> On touche pas aux champs soloq_*
       console.log(`   [KEEP] On garde le rang ${smurf.soloq_tier} (Unranked sur l'API)`);
     } else {
-      // Jamais eu de rang, on met null
       updateData.soloq_tier = null;
     }
 
     // 4. Update DB
     db.updateSmurfData(smurfId, updateData);
 
-    console.log(`[UPDATE] ${smurf.pseudo} completed.`);
+    console.log(`[UPDATE] ${smurf.pseudo} completed (${queue}/${period}).`);
   } catch (err) {
     console.error(`[UPDATE] Error ${smurf.pseudo}: ${err.message}`);
   }
@@ -244,7 +240,7 @@ export async function refreshSmurfs(req, res) {
   const userId = req.session?.user_id;
   if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
-  const { queue = 'ranked', period = '30', force = false } = req.body;
+  const { queue = 'soloq', period = '30', force = false } = req.body;
 
   db.updateUserPreferences(userId, period, queue);
 

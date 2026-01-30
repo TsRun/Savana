@@ -104,7 +104,21 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_id INTEGER PRIMARY KEY,
       stats_period TEXT DEFAULT '30',
-      stats_queue TEXT DEFAULT 'ranked',
+      stats_queue TEXT DEFAULT 'soloq',
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Table des amis (Friends)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS friends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      puuid TEXT NOT NULL,
+      pseudo TEXT NOT NULL,
+      stats_json TEXT DEFAULT NULL,
+      last_updated TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
@@ -141,6 +155,27 @@ export async function initDb() {
     console.error('[DB] Erreur migration tour_completed:', err.message);
   }
 
+  // Migration: Ajouter la colonne stats_json si elle n'existe pas
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(row => row[1]);
+      if (!columns.includes('stats_json')) {
+        db.run('ALTER TABLE smurfs ADD COLUMN stats_json TEXT DEFAULT NULL');
+        console.log('[DB] Migration: colonne stats_json ajoutee');
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration stats_json:', err.message);
+  }
+
+  // Migration: Update old 'ranked' preference to 'soloq'
+  try {
+    db.run("UPDATE user_preferences SET stats_queue = 'soloq' WHERE stats_queue = 'ranked'");
+  } catch (e) {
+    console.error('[DB] Migration prefs ranked->soloq fail:', e.message);
+  }
+
   saveDatabase();
   console.log('[DB] Base de donnees initialisee');
 }
@@ -151,6 +186,9 @@ export async function initDb() {
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
 }
+
+
+
 
 // === USERS ===
 
@@ -235,6 +273,7 @@ export function getUserSmurfs(userId) {
   // Parser tous les JSON stats
   return smurfs.map(smurf => ({
     ...smurf,
+    stats_json: smurf.stats_json ? JSON.parse(smurf.stats_json) : {},
     stats_30_ranked: smurf.stats_30_ranked ? JSON.parse(smurf.stats_30_ranked) : null,
     stats_30_all: smurf.stats_30_all ? JSON.parse(smurf.stats_30_all) : null,
     stats_season_ranked: smurf.stats_season_ranked ? JSON.parse(smurf.stats_season_ranked) : null,
@@ -317,6 +356,11 @@ export function updateSmurfData(smurfId, data) {
     values.push(JSON.stringify(data.stats_season_all));
   }
 
+  if (data.stats_json !== undefined) {
+    fields.push('stats_json = ?');
+    values.push(JSON.stringify(data.stats_json));
+  }
+
   fields.push('last_updated = CURRENT_TIMESTAMP');
   values.push(smurfId);
 
@@ -391,13 +435,13 @@ export function getUserPreferences(userId) {
     });
     // Ensure defaults
     if (!prefs.stats_period) prefs.stats_period = '30';
-    if (!prefs.stats_queue) prefs.stats_queue = 'ranked';
+    if (!prefs.stats_queue) prefs.stats_queue = 'soloq';
     if (prefs.tour_completed === undefined || prefs.tour_completed === null) prefs.tour_completed = 0;
 
     return prefs;
   }
   // Default if not found
-  return { stats_period: '30', stats_queue: 'ranked', tour_completed: 0 };
+  return { stats_period: '30', stats_queue: 'soloq', tour_completed: 0 };
 }
 
 /**
@@ -424,6 +468,45 @@ export function updateUserPreferences(userId, statsPeriod, statsQueue, tourCompl
 /**
  * Reset all rank and stats data for all smurfs (for debugging/maintenance)
  */
+// Friends - New helpers
+export function addFriend(userId, puuid, pseudo) {
+  db.run(`
+    INSERT INTO friends (user_id, puuid, pseudo)
+    VALUES (?, ?, ?)
+  `, [userId, puuid, pseudo]);
+  const result = db.exec('SELECT last_insert_rowid() as id');
+  saveDatabase();
+  return result[0].values[0][0];
+}
+
+export function getUserFriends(userId) {
+  const result = db.exec('SELECT * FROM friends WHERE user_id = ? ORDER BY pseudo ASC', [userId]);
+  if (result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map(row => {
+    const friend = {};
+    columns.forEach((col, i) => friend[col] = row[i]);
+    if (friend.stats_json) friend.stats_json = JSON.parse(friend.stats_json);
+    return friend;
+  });
+}
+
+export function deleteFriend(friendId, userId) {
+  db.run('DELETE FROM friends WHERE id = ? AND user_id = ?', [friendId, userId]);
+  const changes = db.getRowsModified();
+  saveDatabase();
+  return changes > 0;
+}
+
+export function updateFriendData(friendId, stats) {
+  db.run(`
+    UPDATE friends 
+    SET stats_json = ?, last_updated = CURRENT_TIMESTAMP 
+    WHERE id = ?
+  `, [JSON.stringify(stats), friendId]);
+  saveDatabase();
+}
+
 export function resetAllSmurfData() {
   db.run(`
     UPDATE smurfs SET
@@ -477,5 +560,10 @@ export default {
   getSmurfById,
   getUserPreferences,
   updateUserPreferences,
-  resetAllSmurfData
+  resetAllSmurfData,
+  // Friends
+  addFriend,
+  getUserFriends,
+  deleteFriend,
+  updateFriendData
 };

@@ -8,6 +8,7 @@ import smurfsRoutes from './routes/smurfs.js';
 import preferencesRoutes from './routes/preferences.js';
 import tokensRoutes from './routes/tokens.js';
 import riotClientRoutes from './routes/riotClient.js';
+import friendsRoutes from './routes/friends.js';
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use('/api/smurfs', smurfsRoutes);
 app.use('/api/preferences', preferencesRoutes);
 app.use('/api/tokens', tokensRoutes);
 app.use('/api/riot-client', riotClientRoutes);
+app.use('/api/friends', friendsRoutes);
 
 // Servir le Frontend en Production (Unified Server)
 import path from 'path';
