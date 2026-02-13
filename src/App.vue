@@ -83,39 +83,27 @@
                   <option value="flex">Flex</option>
                   <option value="all">All</option>
               </select>
-              
-              <select v-model="sortBy" class="select-input" @change="handleSortChange">
-                <option value="soloq">Sort: SoloQ</option>
-                <option value="flex">Sort: Flex</option>
-                <option value="level">Sort: Level</option>
-                <option value="name">Sort: Name</option>
-              </select>
-              
-              <div class="toggle-group" style="display: flex; background: var(--bg-tertiary); padding: 2px; border-radius: 8px;">
-                <button 
-                  @click="displayRank = 'soloq'" 
-                  class="toggle-btn" 
-                  :class="{ active: displayRank === 'soloq' }"
-                  style="padding: 4px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600;"
-                  title="Show SoloQ Rank"
-                >SoloQ</button>
-                <button 
-                  @click="displayRank = 'flex'" 
-                  class="toggle-btn" 
-                  :class="{ active: displayRank === 'flex' }"
-                  style="padding: 4px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600;"
-                  title="Show Flex Rank"
-                >Flex</button>
-              </div>
             </div>
-            <button @click="refreshElo" :disabled="loading" class="btn btn-ghost">
+            <button @click="refreshElo(false)" :disabled="loading" class="btn btn-ghost" title="Rafraîchir les stats (respecte le cooldown de 10 min)">
               <span v-if="loading" class="loading-spinner"></span>
-              <span v-else>Refresh</span>
+              <span v-else>Refresh Stats</span>
+            </button>
+            <button @click="refreshElo(true)" :disabled="loading" class="btn btn-update-all" title="Force la mise à jour complète de tous les comptes : rangs, niveaux, stats (ignore le cooldown)">
+              <svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                <path d="M21.5 2v6h-6"/>
+                <path d="M2.5 22v-6h6"/>
+                <path d="M2 11.5a10 10 0 0118.8-4.3L21.5 8"/>
+                <path d="M22 12.5a10 10 0 01-18.8 4.3L2.5 16"/>
+              </svg>
+              <span v-if="loading" class="loading-spinner"></span>
+              <span v-else>Update All</span>
+            </button>
+            <button @click="saveCurrentAccount" class="btn btn-primary" title="Sauvegarde le compte actuellement connecté au Riot Client">
+              💾 Save Account
             </button>
             <button @click="resetClient" class="btn btn-danger-outline" title="Ferme Riot + LoL et supprime la session active">
-              Reset Client
+              Logout
             </button>
-            <button @click="openAddModal" class="btn btn-primary">+ Add</button>
           </div>
         </header>
         <div v-if="error" class="error-banner">{{ error }}</div>
@@ -179,7 +167,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import Login from './components/Login.vue';
 import AddSmurfModal from './components/AddSmurfModal.vue';
 import AddFriendModal from './components/AddFriendModal.vue';
@@ -206,6 +194,21 @@ const toasts = ref([]);
 const currentView = ref('accounts');
 const showSmurfsInFriends = ref(false);
 const statsQueue = ref('soloq');
+
+// When user changes the queue filter, update backend preferences and re-fetch
+watch(statsQueue, async (newQueue) => {
+  try {
+    await fetch(apiUrl.value + '/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ stats_queue: newQueue })
+    });
+    await fetchSmurfs();
+  } catch (e) {
+    console.error('Failed to update queue preference:', e);
+  }
+});
 
 // Confirm dialog state
 const confirmDialog = ref({
@@ -288,30 +291,18 @@ const filteredSmurfs = computed(() => {
 
 
   result.sort((a, b) => {
-    const valA = getScore(a, sortBy.value);
-    const valB = getScore(b, sortBy.value);
+    const valA = getScore(a, displayRank.value);
+    const valB = getScore(b, displayRank.value);
 
-    if (sortBy.value === 'name') {
-      return valA.localeCompare(valB);
+    // If same rank score, sort by level (higher first)
+    if (valA === valB) {
+      return (b.Level || 0) - (a.Level || 0);
     }
     
-    return valB - valA; // Descending for everything else
+    return valB - valA; // Descending
   });
 
-  // Inject Dynamic Stats based on Filter
-  return result.map(s => {
-      const key = `stats_30_${statsQueue.value}`;
-      let statsToShow = null;
-      
-      if (s.stats_json && s.stats_json[key]) {
-          statsToShow = s.stats_json[key];
-      } else if (statsQueue.value === 'soloq') {
-          // Default fallback if json missing but column populated (legacy)
-          statsToShow = s.Stats;
-      }
-      
-      return { ...s, Stats: statsToShow };
-  });
+  return result;
 });
 
 
@@ -335,6 +326,9 @@ const checkAuth = async () => {
       isAuthenticated.value = true;
       await fetchSmurfs();
       await fetchFriends();
+      // Start auto-refresh and trigger initial stats refresh
+      startAutoRefresh();
+      refreshElo();
     }
   } catch (e) { console.error('Auth check failed:', e); }
 };
@@ -344,6 +338,9 @@ const handleLoginSuccess = (data) => {
   currentUser.value = { ...data.user, preferences: data.preferences };
   fetchSmurfs();
   fetchFriends();
+  // Start auto-refresh and trigger initial stats refresh
+  startAutoRefresh();
+  refreshElo();
 };
 
 const logout = async () => {
@@ -367,12 +364,14 @@ const fetchSmurfs = async () => {
     // Si on est dans Electron, vérifier les sessions sauvegardées
     if (window.electronAPI?.isElectron) {
       try {
-        const savedFilenames = await window.electronAPI.getSavedSessions();
+        const savedSessions = await window.electronAPI.getSavedSessions();
         smurfs.value = data.map(s => {
             const safeName = s.Pseudo ? getSafeFilename(s.Pseudo) : null;
+            const sessionInfo = safeName ? savedSessions.find(sess => sess.name === safeName) : null;
             return {
                 ...s,
-                hasSession: safeName ? savedFilenames.includes(safeName) : false
+                hasSession: !!sessionInfo,
+                sessionSavedAt: sessionInfo?.savedAt || null
             };
         });
       } catch (e) {
@@ -461,12 +460,12 @@ const handleRefreshSmurf = async (payload) => {
 };
 
 
-const refreshElo = async () => {
+const refreshElo = async (force = false) => {
   loading.value = true;
   error.value = null;
-  showToast('Refreshing...', 'info');
+  showToast(force ? 'Mise à jour complète...' : 'Refreshing...', 'info');
   try {
-    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value }) });
+    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value, force }) });
     setTimeout(async () => { await fetchSmurfs(); loading.value = false; showToast('Done!', 'success'); }, 3000);
   } catch (e) { error.value = e.message; loading.value = false; }
 };
@@ -493,6 +492,60 @@ const resetClient = async () => {
     showToast('Client réinitialisé', 'success');
   } catch (e) {
     showToast('Echec: ' + e.message, 'error');
+  }
+};
+
+const saveCurrentAccount = async () => {
+  showToast('Détection du compte...', 'info');
+  try {
+    if (!window.electronAPI?.isElectron) {
+      throw new Error('Disponible uniquement sur l\'application Desktop');
+    }
+    
+    // 1. Récupérer le compte actuellement connecté
+    const accountRes = await fetch(apiUrl.value + '/riot-client/current-account', { credentials: 'include' });
+    if (!accountRes.ok) {
+      const err = await accountRes.json();
+      throw new Error(err.error || 'Impossible de détecter le compte');
+    }
+    
+    const accountData = await accountRes.json();
+    const riotId = `${accountData.gameName}#${accountData.tagLine}`;
+    
+    // 2. Créer/Mettre à jour l'entrée smurf via l'API
+    const addRes = await fetch(apiUrl.value + '/smurfs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        pseudo: accountData.gameName,
+        tag: accountData.tagLine,
+        puuid: accountData.puuid
+      })
+    });
+    
+    if (!addRes.ok) {
+      const err = await addRes.json();
+      // Si déjà existant, on continue quand même pour sauvegarder la session
+      if (!err.error?.includes('existe')) {
+        throw new Error(err.error || 'Erreur lors de l\'ajout');
+      }
+    }
+    
+    // 3. Sauvegarder la session via Electron
+    const filename = getSafeFilename(accountData.gameName);
+    const saveRes = await window.electronAPI.saveSession(filename);
+    
+    if (!saveRes.success) {
+      throw new Error(saveRes.error || 'Erreur sauvegarde session');
+    }
+    
+    await fetchSmurfs(); // Refresh la liste immédiat
+    showToast(`✅ ${riotId} sauvegardé ! Récupération des données...`, 'success');
+    // Re-fetch après un délai pour laisser le scheduler récupérer level/rank
+    setTimeout(async () => { await fetchSmurfs(); }, 4000);
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
   }
 };
 
@@ -691,6 +744,8 @@ onMounted(async () => {
 .btn-ghost:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 .btn-danger-outline { background: transparent; color: var(--error); border: 1px solid var(--error); margin-right: 8px; }
 .btn-danger-outline:hover { background: rgba(239, 68, 68, 0.1); }
+.btn-update-all { background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.15)); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); display: inline-flex; align-items: center; gap: 6px; }
+.btn-update-all:hover { background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(217, 119, 6, 0.25)); border-color: #f59e0b; transform: translateY(-1px); }
 .select-input { padding: 8px 12px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; outline: none; font-size: 0.875rem; cursor: pointer; }
 .toggle-btn { background: transparent; color: var(--text-muted); transition: all 0.2s; }
 .toggle-btn:hover { color: var(--text-primary); }

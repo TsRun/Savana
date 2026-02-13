@@ -97,27 +97,30 @@ const steps = [
   },
   {
     target: '.btn-primary',
-    title: 'Ajout de compte',
-    content: 'Ajoutez vos comptes smurfs ici. Une fois connectés, vous pourrez sauvegarder leur session pour une reconnexion instantanée sans mot de passe.'
+    title: '💾 Sauvegarder un compte',
+    content: '1. Connectez-vous au Riot Client avec le compte souhaité.\n2. Cliquez sur "Save Account" pour l\'enregistrer automatiquement dans Savana.'
   },
-  // New Steps with Demo Card
+  {
+    target: '.btn-primary',
+    title: '⏳ Expiration des sessions',
+    content: 'Les sessions sauvegardées expirent au bout de 4 à 10 jours. Pensez à les re-sauvegarder régulièrement ! Un badge orange (4j+) ou rouge (7j+) apparaîtra sur la carte pour vous prévenir.'
+  },
+  {
+    target: '.btn-update-all',
+    title: '🔄 Refresh Stats vs Update All',
+    content: '"Refresh Stats" met à jour les stats rapidement (cooldown 10 min). "Update All" force la mise à jour complète de tous les comptes : rangs, niveaux et stats, sans cooldown.'
+  },
+  // Demo Card Steps
   {
     target: '.tour-demo-card', 
     title: 'Vos Cartes de Compte',
-    content: 'Voici à quoi ressemble un compte ajouté. Vous y voyez votre rang, vos stats (connexion API automatique) et des actions rapides.',
+    content: 'Voici à quoi ressemble un compte sauvegardé. Vous y voyez votre rang, vos stats et des actions rapides.',
     showDemo: true
   },
   {
-    target: '.tour-demo-card .action-btn.save-token', 
-    title: '1. Sauvegarder la Session',
-    content: 'Une fois connecté au client Riot avec ce compte, cliquez ici pour SAUVEGARDER la session. Une icône verte apparaîtra.',
-    showDemo: true,
-    highlightDemoSelector: '.action-btn:nth-child(1)'
-  },
-  {
     target: '.tour-demo-card .action-btn.primary-action',
-    title: '2. Charger (Play)',
-    content: 'Le bouton le plus important ! Cliquez sur LOAD pour fermer Riot, nettoyer les traces, injecter la session et lancer le jeu. Connexion automatique !',
+    title: '▶️ Charger (Play)',
+    content: 'Le bouton le plus important ! Cliquez sur LOAD pour fermer Riot, injecter la session et lancer le jeu. Connexion automatique !',
     showDemo: true,
     highlightDemoSelector: '.action-btn.primary-action'
   },

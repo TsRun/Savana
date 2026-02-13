@@ -36,35 +36,56 @@ router.get('/', requireAuth, (req, res) => {
 
   const prefs = db.getUserPreferences(userId);
   const period = prefs?.stats_period || '30';
-  const queue = prefs?.stats_queue || 'ranked';
-  const statsKey = `stats_${period}_${queue}`;
+  const queue = prefs?.stats_queue || 'soloq';
+  
+  // Map queue names to legacy column names
+  const legacyQueueMap = { 'soloq': 'ranked', 'flex': 'ranked', 'all': 'all' };
+  const legacyQueue = legacyQueueMap[queue] || 'ranked';
+  const legacyStatsKey = `stats_${period}_${legacyQueue}`;
+  const dynamicStatsKey = `stats_${period}_${queue}`;
 
-  const formattedSmurfs = smurfs.map(smurf => ({
-    PUUID: smurf.puuid,
-    Pseudo: smurf.pseudo,
-    UserName: smurf.username,
-    Password: smurf.password,
-    Elo_SoloQ: smurf.soloq_tier ? {
-      tier: smurf.soloq_tier,
-      rank: smurf.soloq_rank,
-      lp: smurf.soloq_lp,
-      wins: smurf.soloq_wins,
-      losses: smurf.soloq_losses
-    } : null,
-    Elo_Flex: smurf.flex_tier ? {
-      tier: smurf.flex_tier,
-      rank: smurf.flex_rank,
-      lp: smurf.flex_lp,
-      wins: smurf.flex_wins,
-      losses: smurf.flex_losses
-    } : null,
-    Level: smurf.level,
-    Stats: smurf[statsKey] || (smurf.stats_json && smurf.stats_json[statsKey]) || null,
-    last_updated: smurf.last_updated,
-    id: smurf.id,
-    hasToken: !!smurf.riot_tokens,
-    is_syncing: false // Could be real if we track global state
-  }));
+  const formattedSmurfs = smurfs.map(smurf => {
+    // Try dynamic stats_json first, then legacy columns
+    let stats = null;
+    if (smurf.stats_json && smurf.stats_json[dynamicStatsKey]) {
+      stats = smurf.stats_json[dynamicStatsKey];
+    } else if (smurf[legacyStatsKey]) {
+      stats = smurf[legacyStatsKey];
+    } else if (smurf.stats_json) {
+      // Fallback: try any available stats in stats_json
+      const keys = Object.keys(smurf.stats_json);
+      if (keys.length > 0) {
+        stats = smurf.stats_json[keys[0]];
+      }
+    }
+
+    return {
+      PUUID: smurf.puuid,
+      Pseudo: smurf.pseudo,
+      UserName: smurf.username,
+      Password: smurf.password,
+      Elo_SoloQ: smurf.soloq_tier ? {
+        tier: smurf.soloq_tier,
+        rank: smurf.soloq_rank,
+        lp: smurf.soloq_lp,
+        wins: smurf.soloq_wins,
+        losses: smurf.soloq_losses
+      } : null,
+      Elo_Flex: smurf.flex_tier ? {
+        tier: smurf.flex_tier,
+        rank: smurf.flex_rank,
+        lp: smurf.flex_lp,
+        wins: smurf.flex_wins,
+        losses: smurf.flex_losses
+      } : null,
+      Level: smurf.level,
+      Stats: stats,
+      last_updated: smurf.last_updated,
+      id: smurf.id,
+      hasToken: !!smurf.riot_tokens,
+      is_syncing: false
+    };
+  });
 
   res.json(formattedSmurfs);
 });
@@ -193,11 +214,13 @@ async function updateSingleSmurf(smurfId) {
       flex_losses: flex.losses
     };
 
-    // Update Legacy Stats Columns if applicable (for backward compat)
-    if (queue === 'soloq' && period === '30') updateData.stats_30_ranked = stats;
-    if (queue === 'soloq' && period === 'season') updateData.stats_season_ranked = stats;
-    if (queue === 'all' && period === '30') updateData.stats_30_all = stats;
-    if (queue === 'all' && period === 'season') updateData.stats_season_all = stats;
+    // Update Legacy Stats Columns (map soloq -> ranked for backward compat)
+    const legacyQ = (queue === 'soloq' || queue === 'flex') ? 'ranked' : queue;
+    const legacyKey = `stats_${period}_${legacyQ}`;
+    if (legacyKey === 'stats_30_ranked') updateData.stats_30_ranked = stats;
+    if (legacyKey === 'stats_season_ranked') updateData.stats_season_ranked = stats;
+    if (legacyKey === 'stats_30_all') updateData.stats_30_all = stats;
+    if (legacyKey === 'stats_season_all') updateData.stats_season_all = stats;
 
     // Update Dynamic Stats JSON
     let statsJson = {};

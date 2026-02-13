@@ -1,5 +1,6 @@
 import express from 'express';
 import session from 'express-session';
+import FileStoreFactory from 'session-file-store';
 import cors from 'cors';
 import { config } from './config.js';
 import { initDb } from './models/database.js';
@@ -9,6 +10,11 @@ import preferencesRoutes from './routes/preferences.js';
 import tokensRoutes from './routes/tokens.js';
 import riotClientRoutes from './routes/riotClient.js';
 import friendsRoutes from './routes/friends.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const currentFilename = fileURLToPath(import.meta.url);
+const currentDirname = path.dirname(currentFilename);
 
 const app = express();
 
@@ -29,8 +35,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Sessions
+// File-based Session Store for persistence across restarts
+const FileStore = FileStoreFactory(session);
+const sessionsPath = path.join(currentDirname, '../sessions');
+
 app.use(session({
+  store: new FileStore({
+    path: sessionsPath,
+    ttl: 7 * 24 * 60 * 60, // 7 days in seconds
+    retries: 0,
+    logFn: () => { } // Silence logs
+  }),
   secret: config.sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -38,7 +53,7 @@ app.use(session({
     httpOnly: false,
     secure: false,
     sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   }
 }));
 
@@ -53,12 +68,10 @@ app.use('/api/riot-client', riotClientRoutes);
 app.use('/api/friends', friendsRoutes);
 
 // Servir le Frontend en Production (Unified Server)
-import path from 'path';
-import { fileURLToPath } from 'url';
-const currentFilename = fileURLToPath(import.meta.url);
-const currentDirname = path.dirname(currentFilename);
 
 if (process.env.ELECTRON_MODE) {
+  // En prod (packagé): le backend est dans resources/backend/, le frontend dans resources/frontend/
+  // En dev: jamais utilisé (Vite sert le frontend)
   const frontendPath = path.join(currentDirname, '../frontend');
   console.log('[SERVER] Static Frontend Path:', frontendPath);
 

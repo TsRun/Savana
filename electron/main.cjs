@@ -322,7 +322,7 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
 
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Fermeture de Riot Client (5s)...' });
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Fermeture de Riot Client (2s)...' });
     await killRiotClient();
     await sleep(2000);
 
@@ -367,9 +367,21 @@ ipcMain.handle('get-saved-sessions', async () => {
   try {
     const sessionsDir = path.join(app.getPath('userData'), 'sessions');
     if (!fs.existsSync(sessionsDir)) return [];
-    return fs.readdirSync(sessionsDir).filter(f => {
+
+    const sessionDirs = fs.readdirSync(sessionsDir).filter(f => {
       const p = path.join(sessionsDir, f);
       return fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'RiotGamesPrivateSettings.yaml'));
+    });
+
+    // Return session objects with metadata
+    return sessionDirs.map(name => {
+      const yamlPath = path.join(sessionsDir, name, 'RiotGamesPrivateSettings.yaml');
+      let savedAt = null;
+      try {
+        const stats = fs.statSync(yamlPath);
+        savedAt = stats.mtime.toISOString();
+      } catch (e) { }
+      return { name, savedAt };
     });
   } catch (error) {
     return [];
@@ -378,7 +390,7 @@ ipcMain.handle('get-saved-sessions', async () => {
 
 ipcMain.handle('reset-riot-client', async () => {
   try {
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Arrêt des processus (5s)...' });
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Arrêt des processus (2s)...' });
     await killRiotClient();
     await sleep(1000);
 
@@ -415,12 +427,17 @@ app.whenReady().then(() => {
   createWindow();
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdatesAndNotify().catch(err => {
+      console.log('[AutoUpdater] Pas de mise à jour disponible:', err.message);
+    });
     autoUpdater.on('update-available', () => {
       if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading' });
     });
     autoUpdater.on('update-downloaded', () => {
       if (mainWindow) mainWindow.webContents.send('update-status', { status: 'ready' });
+    });
+    autoUpdater.on('error', (err) => {
+      console.log('[AutoUpdater] Error:', err.message);
     });
   }
 });

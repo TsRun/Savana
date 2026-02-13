@@ -31,12 +31,11 @@ Savana is a modern, secure, and efficient desktop application for managing multi
 
 1.  **Install dependencies**:
     ```bash
-    cd frontend
     npm install
     ```
 
 2.  **Environment Variables**:
-    Create a `.env` file in the root (or `frontend/.env`) with:
+    Create a `.env` file in the project root with:
     ```env
     RIOT_API_KEY=RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     SECRET_KEY=your-secret-key
@@ -53,23 +52,22 @@ Savana is a modern, secure, and efficient desktop application for managing multi
 To create the `.exe` installer:
 
 ```bash
-cd frontend
 npm run electron:build
 ```
-The output file (`Savana Setup 2.0.0.exe`) will be in `frontend/release`.
+The output file (`Savana Setup 2.0.0.exe`) will be in `release`.
 
 ## 📂 Project Structure
 
-*   `frontend/src`: Vue frontend code.
-*   `frontend/server`: Express backend code (API, Database, Riot Utils).
-*   `frontend/electron`: Electron main and preload scripts.
-*   `frontend/release`: Output directory for builds.
+*   `src`: Vue frontend code.
+*   `server`: Express backend code (API, Database, Riot Utils).
+*   `electron`: Electron main and preload scripts.
+*   `release`: Output directory for builds.
 
 ## 🧹 Maintenance
 
 *   **Reset Ranks**: To wipe all local rank data (set everyone to Unranked):
     ```bash
-    node frontend/server/scripts/cleanup_ranks.js
+    node server/scripts/cleanup_ranks.js
     ```
 *   **Clean Build**: Delete `dist`, `release`, and `backend-dist` folders.
 

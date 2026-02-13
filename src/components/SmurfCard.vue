@@ -10,6 +10,24 @@
         <span class="level-value">{{ smurf.Level || '?' }}</span>
         <span class="level-label">LVL</span>
       </div>
+
+      <!-- Data Freshness Badge -->
+      <div v-if="dataFreshness === 'expired'" class="freshness-badge data-expired" :title="`Dernière mise à jour il y a ${dataAgeDays} jours`">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>{{ dataAgeDays }}j — Obsolète, rafraîchir !</span>
+      </div>
+      <div v-else-if="dataFreshness === 'warning'" class="freshness-badge data-warning" :title="`Dernière mise à jour il y a ${dataAgeDays} jours`">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>{{ dataAgeDays }}j sans màj</span>
+      </div>
       
       <!-- Sync Status -->
       <div v-if="smurf.is_syncing" class="sync-status" title="Mise à jour en cours...">
@@ -105,14 +123,15 @@
       <button 
         @click="$emit('save-session', smurf)" 
         class="action-btn"
-        :class="{ 'has-token': smurf.hasSession }"
-        :title="smurf.hasSession ? 'Session déjà sauvegardée (clic pour mettre à jour)' : 'Sauvegarder la session actuelle (RiotGamesPrivateSettings.yaml)'"
+        :class="{ 'has-token': smurf.hasSession, 'session-old': isSessionOld }"
+        :title="getSessionTitle"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
           <polyline points="17 21 17 13 7 13 7 21"/>
           <polyline points="7 3 7 8 15 8"/>
         </svg>
+        <span v-if="isSessionOld" class="warning-badge">⚠️</span>
       </button>
       
       <button 
@@ -178,6 +197,49 @@ const getTag = computed(() => {
   return parts.length > 1 ? `#${parts[1]}` : '';
 });
 
+// Data freshness tracking
+const dataAgeDays = computed(() => {
+  if (!props.smurf.last_updated) return null;
+  const updated = new Date(props.smurf.last_updated);
+  const now = new Date();
+  return Math.floor((now - updated) / (1000 * 60 * 60 * 24));
+});
+
+const dataFreshness = computed(() => {
+  if (dataAgeDays.value === null) return 'fresh';
+  if (dataAgeDays.value >= 7) return 'expired';
+  if (dataAgeDays.value >= 4) return 'warning';
+  return 'fresh';
+});
+
+// Session age tracking
+const sessionAgeDays = computed(() => {
+  if (!props.smurf.sessionSavedAt) return null;
+  const saved = new Date(props.smurf.sessionSavedAt);
+  const now = new Date();
+  return Math.floor((now - saved) / (1000 * 60 * 60 * 24));
+});
+
+const isSessionOld = computed(() => {
+  return sessionAgeDays.value !== null && sessionAgeDays.value > 7;
+});
+
+const getSessionTitle = computed(() => {
+  if (!props.smurf.hasSession) {
+    return 'Sauvegarder la session actuelle (RiotGamesPrivateSettings.yaml)';
+  }
+  if (sessionAgeDays.value !== null) {
+    if (sessionAgeDays.value === 0) {
+      return 'Session sauvegardée aujourd\'hui (clic pour mettre à jour)';
+    }
+    if (isSessionOld.value) {
+      return `⚠️ Session vieille de ${sessionAgeDays.value} jours - Peut être expirée ! Cliquez pour re-sauvegarder`;
+    }
+    return `Session sauvegardée il y a ${sessionAgeDays.value} jour(s) (clic pour mettre à jour)`;
+  }
+  return 'Session sauvegardée (clic pour mettre à jour)';
+});
+
 // Determine if we need to show a fallback rank
 const primaryRank = computed(() => {
   if (props.displayRank === 'flex') {
@@ -238,18 +300,39 @@ const rankTier = computed(() => {
 const rankLP = computed(() => rankData.value.lp || 0);
 
 const winrate = computed(() => {
-  if (!rankData.value.wins && !rankData.value.losses) {
-    return props.smurf.Stats?.winrate || 0;
+  // First check if we have ranked data
+  const wins = rankData.value.wins || 0;
+  const losses = rankData.value.losses || 0;
+  const rankedTotal = wins + losses;
+  
+  if (rankedTotal > 0) {
+    return Math.round((wins / rankedTotal) * 100);
   }
-  const total = (rankData.value.wins || 0) + (rankData.value.losses || 0);
-  if (total === 0) return 0;
-  return Math.round((rankData.value.wins / total) * 100);
+  
+  // Fallback to Stats data if available
+  if (props.smurf.Stats?.total_games > 0) {
+    return props.smurf.Stats.winrate || 0;
+  }
+  
+  return 0; // No data at all
 });
 
 const rankedGames = computed(() => {
+  // First check ranked data
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
-  return wins + losses;
+  const rankedTotal = wins + losses;
+  
+  if (rankedTotal > 0) {
+    return rankedTotal;
+  }
+  
+  // Fallback to Stats if available
+  if (props.smurf.Stats?.total_games) {
+    return props.smurf.Stats.total_games;
+  }
+  
+  return 0;
 });
 
 // Check if this is a previous season rank (0 games this season)
@@ -648,6 +731,28 @@ const rankIconStyle = computed(() => {
   color: #22c55e;
 }
 
+.action-btn.session-old {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #f59e0b;
+}
+
+.action-btn.session-old:hover {
+  background: rgba(245, 158, 11, 0.4);
+  border-color: #f59e0b;
+}
+
+.warning-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 12px;
+}
+
+.action-btn {
+  position: relative;
+}
+
 .action-btn.save-token:hover {
   background: rgba(34, 197, 94, 0.35);
   border-color: #22c55e;
@@ -700,6 +805,36 @@ const rankIconStyle = computed(() => {
 
 .card-glow.active {
   opacity: 1;
+}
+
+/* Data Freshness Badges */
+.freshness-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.data-warning {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+}
+
+.data-expired {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .sync-status {

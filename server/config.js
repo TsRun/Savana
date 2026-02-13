@@ -9,7 +9,7 @@ const _dirname = path.dirname(_filename);
 const isProd = process.env.ELECTRON_MODE === 'true';
 const envPath = isProd
   ? path.join(_dirname, '../.env') // resources/.env (backend is in resources/backend)
-  : path.join(_dirname, '../../.env'); // frontend/.env
+  : path.join(_dirname, '../.env'); // project root/.env
 
 console.log('[CONFIG] Loading .env from:', envPath);
 console.log('[CONFIG] Current working directory:', process.cwd());

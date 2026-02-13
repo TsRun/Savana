@@ -4,6 +4,9 @@
       <div class="spinner"></div>
       <div class="loading-message">{{ state.message }}</div>
       <div class="loading-sub">Veuillez patienter...</div>
+      <button @click="cancelLoading" class="cancel-btn">
+        ✕ Annuler
+      </button>
     </div>
   </div>
 </template>
@@ -28,8 +31,19 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  // Cleanup logic if needed (ipcRenderer.removeListener not directly exposed but handler is managed)
+  // Cleanup logic if needed
 });
+
+const cancelLoading = () => {
+  // Reset the loading state
+  state.status = 'idle';
+  state.message = '';
+  
+  // Try to kill any Riot processes if possible
+  if (window.electronAPI?.cancelLaunch) {
+    window.electronAPI.cancelLaunch();
+  }
+};
 </script>
 
 <style scoped>
@@ -72,6 +86,24 @@ onUnmounted(() => {
 .loading-sub {
   color: #a1a1aa;
   font-size: 0.875rem;
+}
+
+.cancel-btn {
+  margin-top: 20px;
+  padding: 10px 24px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.4);
+  border-color: #ef4444;
 }
 
 @keyframes spin {

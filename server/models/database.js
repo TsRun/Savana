@@ -169,6 +169,20 @@ export async function initDb() {
     console.error('[DB] Erreur migration stats_json:', err.message);
   }
 
+  // Migration: Ajouter la colonne session_saved_at pour tracker l'âge des sessions
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(row => row[1]);
+      if (!columns.includes('session_saved_at')) {
+        db.run('ALTER TABLE smurfs ADD COLUMN session_saved_at TIMESTAMP DEFAULT NULL');
+        console.log('[DB] Migration: colonne session_saved_at ajoutee');
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration session_saved_at:', err.message);
+  }
+
   // Migration: Update old 'ranked' preference to 'soloq'
   try {
     db.run("UPDATE user_preferences SET stats_queue = 'soloq' WHERE stats_queue = 'ranked'");

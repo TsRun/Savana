@@ -114,11 +114,12 @@ export async function getSummonerLevel(puuid, gameName = null, tagLine = null) {
 
 // Queue IDs Mapping
 const QUEUE_IDS = {
-  'ranked': 420,
+  'soloq': 420,    // Ranked Solo/Duo
+  'ranked': 420,   // Alias for backward compat
   'flex': 440,
   'aram': 450,
   'arena': 1700,
-  'normal': 400, // Draft Pick
+  'normal': 400,
   'quickplay': 490
 };
 
@@ -242,6 +243,24 @@ export async function calculateStats(puuid, matchIds) {
 
   champArray.sort((a, b) => b.games - a.games);
 
+  // Logic "Main Champions" (Rule: 2x games to stand out)
+  let bestChamps = [];
+  if (champArray.length > 0) {
+    bestChamps.push(champArray[0]);
+    if (champArray.length > 1) {
+      // If #1 has < 2x games of #2, show #2 as well
+      if (champArray[0].games < (2 * champArray[1].games)) {
+        bestChamps.push(champArray[1]);
+        if (champArray.length > 2) {
+          // If #2 has < 2x games of #3, show #3 as well
+          if (champArray[1].games < (2 * champArray[2].games)) {
+            bestChamps.push(champArray[2]);
+          }
+        }
+      }
+    }
+  }
+
   return {
     kda,
     avg_kills: Math.round((totalKills / gamesCount) * 10) / 10,
@@ -253,7 +272,7 @@ export async function calculateStats(puuid, matchIds) {
     total_games: gamesCount,
     main_role: mainRole,
     role_percentage: rolePercentage,
-    best_champions: champArray.slice(0, 3)
+    best_champions: bestChamps
   };
 
 

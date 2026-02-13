@@ -76,7 +76,7 @@
               <div class="champs-list">
                 <div v-for="champ in getTopChamps(player)" :key="champ.name" class="champ-item" :title="champ.name + ' (' + champ.winrate + '%)'">
                   <img :src="getChampIcon(champ.name)" class="champ-icon" />
-                  <span class="champ-wr" :class="getWrClass(champ.winrate)">{{ champ.winrate }}%</span>
+
                 </div>
               </div>
             </td>
@@ -94,9 +94,6 @@
             <td class="col-actions">
               <button v-if="player.type === 'friend'" @click="deleteFriend(player.id)" class="btn-icon delete" title="Remove Friend">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-              <button @click="refreshPlayer(player)" class="btn-icon refresh" title="Refresh Stats">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </td>
           </tr>
@@ -345,4 +342,19 @@ input:checked + .toggle-slider::after { transform: translateX(20px); background:
 .text-success { color: #34d399; }
 .text-muted { color: var(--text-muted); }
 .text-center { text-align: center; }
+
+.select-input { 
+  padding: 8px 12px; 
+  background: var(--bg-tertiary); 
+  color: var(--text-primary); 
+  border: 1px solid var(--border-subtle); 
+  border-radius: 8px; 
+  outline: none; 
+  font-size: 0.875rem; 
+  cursor: pointer; 
+}
+.select-input:focus { 
+  border-color: var(--accent-primary); 
+  box-shadow: 0 0 0 3px var(--accent-glow); 
+}
 </style>

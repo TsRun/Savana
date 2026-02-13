@@ -1,11 +1,13 @@
 # Dépendances
 node_modules/
 .pnpm-store/
+package-lock.json
 
 # Base de données et Sessions (Local)
 *.db
 *.db-journal
 *.sqlite
+smurfs.db
 sessions/
 storage/
 
@@ -55,3 +57,8 @@ coverage/
 *.bak
 *_old.*
 *.backup
+
+# Temp
+*.tmp
+*.temp
+.cache/
