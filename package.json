@@ -1,0 +1,107 @@
+{
+  "name": "savana",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Savana - League of Legends Account Manager",
+  "author": "Mathis",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server/server.js",
+    "init-db": "node server/init-db.js",
+    "check-db": "node server/check-db.js",
+    "migrate-db": "node server/migrate-db.js",
+    "dev:fullstack": "concurrently \"npm run server\" \"npm run dev\"",
+    "wait-electron": "node scripts/wait-electron.js",
+    "start": "concurrently -k \"npm run server\" \"npm run dev\" \"npm run wait-electron\"",
+    "electron:dev": "concurrently -k \"npm run server\" \"npm run dev\" \"npm run wait-electron\"",
+    "electron:serve": "cross-env NODE_ENV=development electron .",
+    "electron:serve-external": "concurrently -k \"npm run server\" \"npm run dev\" \"npm run wait-electron\"",
+    "build:backend": "node scripts/build-backend.cjs",
+    "electron:build": "npm run build:backend && vite build && electron-builder",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.savana.app",
+    "productName": "Savana",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "backend-dist",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".env",
+        "to": "."
+      },
+      {
+        "from": "dist",
+        "to": "frontend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/SavanaLogo.jpg"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.games"
+    }
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "electron-updater": "^6.7.3",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "pinia": "^2.1.7",
+    "session-file-store": "^1.5.0",
+    "sql.js": "^1.10.2",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@headlessui/vue": "^1.7.16",
+    "@heroicons/vue": "^2.0.18",
+    "@tailwindcss/forms": "^0.5.6",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "vite": "^5.0.0",
+    "wait-on": "^9.0.3"
+  }
+}
