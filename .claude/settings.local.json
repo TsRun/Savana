@@ -6,7 +6,8 @@
       "Bash(powershell -NoProfile -Command:*)",
       "Bash(powershell.exe -NoProfile -File - <<'PSEOF'\nGet-Process | Where-Object { $_.Path -and $_.Path.Contains\\('Savana'\\) } | Select-Object Id, ProcessName, Path | Format-Table -AutoSize\nPSEOF)",
       "Bash(powershell.exe -NoProfile -File - <<'PSEOF'\nGet-Process Savana -ErrorAction SilentlyContinue | Stop-Process -Force\nWrite-Host \"All Savana processes killed\"\nPSEOF)",
-      "Bash(npm run electron:build:*)"
+      "Bash(npm run electron:build:*)",
+      "Bash(copy:*)"
     ]
   }
 }

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Savana - Companion App for League of Legends</title>
+  <meta name="description" content="Savana is a free desktop companion for League of Legends. Manage your accounts, track your friends, and monitor your stats in one sleek app.">
+  <meta name="theme-color" content="#0f1117">
+  <link rel="icon" href="logo.jpg">
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e4e4e7;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+
+    /* ===== Navbar ===== */
+    .navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 40px;
+      background: rgba(15, 17, 23, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 1.25rem; font-weight: 700; color: white;
+    }
+    .nav-brand img { width: 32px; height: 32px; border-radius: 6px; }
+    .nav-links { display: flex; gap: 32px; }
+    .nav-links a {
+      font-size: 0.9rem; color: #a1a1aa; transition: color 0.2s;
+    }
+    .nav-links a:hover { color: white; }
+    .nav-cta {
+      padding: 8px 20px; border-radius: 8px; font-weight: 600; font-size: 0.875rem;
+      background: linear-gradient(135deg, #4fd1c5, #38b2ac);
+      color: #0f1117; transition: all 0.2s; border: none; cursor: pointer;
+    }
+    .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(79, 209, 197, 0.3); }
+
+    /* ===== Hero ===== */
+    .hero {
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(79, 209, 197, 0.08) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 40% at 70% 20%, rgba(56, 178, 172, 0.05) 0%, transparent 60%);
+    }
+    .hero > * { position: relative; z-index: 1; }
+    .hero-logo { width: 80px; height: 80px; border-radius: 16px; margin-bottom: 24px; }
+    .hero-badge {
+      display: inline-block; padding: 6px 16px; border-radius: 99px;
+      font-size: 0.8rem; font-weight: 600; color: #4fd1c5;
+      background: rgba(79, 209, 197, 0.1); border: 1px solid rgba(79, 209, 197, 0.2);
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4rem); font-weight: 800;
+      line-height: 1.1; max-width: 700px; margin-bottom: 20px;
+    }
+    .hero h1 .gradient-text {
+      background: linear-gradient(135deg, #4fd1c5, #68d5c8, #81e6d9);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 1.15rem; color: #a1a1aa; max-width: 520px;
+      margin-bottom: 36px; line-height: 1.7;
+    }
+    .hero-buttons { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+    .btn-download {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 14px 32px; border-radius: 12px; font-weight: 700; font-size: 1rem;
+      background: linear-gradient(135deg, #4fd1c5, #38b2ac);
+      color: #0f1117; border: none; cursor: pointer; transition: all 0.25s;
+    }
+    .btn-download:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(79, 209, 197, 0.3); }
+    .btn-download svg { width: 20px; height: 20px; }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 12px; font-weight: 600; font-size: 1rem;
+      background: transparent; color: #a1a1aa;
+      border: 1px solid rgba(255,255,255,0.1); cursor: pointer; transition: all 0.25s;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); color: white; border-color: rgba(255,255,255,0.2); }
+    .hero-note { font-size: 0.8rem; color: #52525b; margin-top: 16px; }
+
+    /* ===== Features ===== */
+    .features {
+      padding: 100px 24px;
+      max-width: 1100px; margin: 0 auto;
+    }
+    .features-header {
+      text-align: center; margin-bottom: 64px;
+    }
+    .features-header h2 {
+      font-size: 2.25rem; font-weight: 800; margin-bottom: 12px;
+    }
+    .features-header p { color: #71717a; font-size: 1.05rem; max-width: 500px; margin: 0 auto; }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px; padding: 32px;
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(79, 209, 197, 0.15);
+      transform: translateY(-4px);
+    }
+    .feature-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; margin-bottom: 20px;
+    }
+    .feature-icon.teal { background: rgba(79, 209, 197, 0.1); }
+    .feature-icon.blue { background: rgba(96, 165, 250, 0.1); }
+    .feature-icon.purple { background: rgba(167, 139, 250, 0.1); }
+    .feature-icon.amber { background: rgba(251, 191, 36, 0.1); }
+    .feature-icon.rose { background: rgba(251, 113, 133, 0.1); }
+    .feature-icon.green { background: rgba(52, 211, 153, 0.1); }
+    .feature-card h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 10px; color: white; }
+    .feature-card p { color: #a1a1aa; font-size: 0.92rem; line-height: 1.6; }
+
+    /* ===== Screenshot / Preview ===== */
+    .preview {
+      padding: 60px 24px 100px;
+      text-align: center;
+    }
+    .preview-window {
+      max-width: 900px; margin: 0 auto;
+      background: #1a1b23;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 80px rgba(0,0,0,0.5);
+    }
+    .preview-titlebar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 18px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .preview-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .preview-dot.red { background: #ef4444; }
+    .preview-dot.yellow { background: #eab308; }
+    .preview-dot.green { background: #22c55e; }
+    .preview-content {
+      padding: 40px;
+      display: flex; flex-direction: column; align-items: center; gap: 20px;
+      min-height: 350px; justify-content: center;
+    }
+    .preview-mock-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 20px 28px;
+      display: flex; align-items: center; gap: 16px;
+      width: 100%; max-width: 500px;
+    }
+    .mock-rank {
+      width: 48px; height: 48px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+    }
+    .mock-rank.gold { background: rgba(251, 191, 36, 0.15); }
+    .mock-rank.plat { background: rgba(96, 165, 250, 0.15); }
+    .mock-rank.dia { background: rgba(167, 139, 250, 0.15); }
+    .mock-info { flex: 1; text-align: left; }
+    .mock-name { font-weight: 700; font-size: 0.95rem; }
+    .mock-tag { color: #52525b; font-size: 0.8rem; }
+    .mock-stats { display: flex; gap: 16px; margin-top: 4px; }
+    .mock-stat { font-size: 0.75rem; color: #71717a; }
+    .mock-stat span { color: #4fd1c5; font-weight: 600; }
+    .mock-actions { display: flex; gap: 8px; }
+    .mock-btn {
+      padding: 6px 14px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; border: none; cursor: default;
+    }
+    .mock-btn.play { background: rgba(79, 209, 197, 0.15); color: #4fd1c5; }
+    .mock-btn.info { background: rgba(255,255,255,0.06); color: #71717a; }
+
+    /* ===== CTA ===== */
+    .cta {
+      padding: 80px 24px 100px;
+      text-align: center;
+    }
+    .cta-box {
+      max-width: 600px; margin: 0 auto;
+      background: linear-gradient(135deg, rgba(79, 209, 197, 0.06), rgba(56, 178, 172, 0.03));
+      border: 1px solid rgba(79, 209, 197, 0.12);
+      border-radius: 20px; padding: 48px 32px;
+    }
+    .cta-box h2 { font-size: 1.75rem; font-weight: 800; margin-bottom: 12px; }
+    .cta-box p { color: #a1a1aa; margin-bottom: 28px; }
+
+    /* ===== Footer ===== */
+    .footer {
+      padding: 32px 24px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      text-align: center;
+      color: #52525b; font-size: 0.8rem;
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 768px) {
+      .navbar { padding: 12px 20px; }
+      .nav-links { display: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .preview-content { padding: 20px; }
+      .preview-mock-card { flex-direction: column; text-align: center; }
+      .mock-info { text-align: center; }
+      .mock-stats { justify-content: center; }
+    }
+
+    /* ===== Animations ===== */
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    .hero-logo { animation: float 4s ease-in-out infinite; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.6s ease forwards; }
+    .fade-up-1 { animation-delay: 0.1s; opacity: 0; }
+    .fade-up-2 { animation-delay: 0.2s; opacity: 0; }
+    .fade-up-3 { animation-delay: 0.3s; opacity: 0; }
+    .fade-up-4 { animation-delay: 0.4s; opacity: 0; }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <img src="logo.jpg" alt="Savana">
+      <span>Savana</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#preview">Preview</a>
+      <a href="#download">Download</a>
+    </div>
+    <a href="#download" class="nav-cta">Download</a>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <img src="logo.jpg" alt="Savana Logo" class="hero-logo">
+    <span class="hero-badge fade-up fade-up-1">Windows App &mdash; 100% Gratuit</span>
+    <h1 class="fade-up fade-up-2">
+      Your <span class="gradient-text">League Companion</span>,<br>Simplified.
+    </h1>
+    <p class="fade-up fade-up-3">
+      Manage your League of Legends accounts, track your friends' ranks and stats, and switch between sessions in one click. All from a sleek desktop app.
+    </p>
+    <div class="hero-buttons fade-up fade-up-4">
+      <a href="#download" class="btn-download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download for Windows
+      </a>
+      <a href="#features" class="btn-secondary">
+        Learn more
+      </a>
+    </div>
+    <p class="hero-note fade-up fade-up-4">Windows 10+ &bull; No sign-up required</p>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="features-header">
+      <h2>Everything you need</h2>
+      <p>A complete companion to level up your League experience.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon teal">&#9889;</div>
+        <h3>Instant Account Switch</h3>
+        <p>Save your session and switch between accounts in seconds. No more typing passwords &mdash; just click and play.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon blue">&#128101;</div>
+        <h3>Friends Tracker</h3>
+        <p>Add friends by Riot ID and keep an eye on their ranks, levels, and stats. See who's climbing and who's falling.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon purple">&#128200;</div>
+        <h3>Live Stats & Winrate</h3>
+        <p>Automatically fetch your KDA, winrate, main champions and role stats. Filter by SoloQ, Flex, or all queues.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon amber">&#127942;</div>
+        <h3>Rank Tracking</h3>
+        <p>See your SoloQ and Flex ranks at a glance with LP, wins, and losses. Badges update automatically.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon rose">&#128274;</div>
+        <h3>Secure & Local</h3>
+        <p>All your data stays on your machine. No cloud, no external servers, no sharing. Your accounts, your control.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon green">&#128640;</div>
+        <h3>Lightweight & Fast</h3>
+        <p>Built with modern tech, Savana starts instantly and runs quietly in the background without impacting your game performance.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Preview -->
+  <section class="preview" id="preview">
+    <div class="preview-window">
+      <div class="preview-titlebar">
+        <div class="preview-dot red"></div>
+        <div class="preview-dot yellow"></div>
+        <div class="preview-dot green"></div>
+      </div>
+      <div class="preview-content">
+        <div class="preview-mock-card">
+          <div class="mock-rank plat">&#128142;</div>
+          <div class="mock-info">
+            <div class="mock-name">Player One <span class="mock-tag">#EUW</span></div>
+            <div class="mock-stats">
+              <div class="mock-stat">Rank: <span>Platinum II</span></div>
+              <div class="mock-stat">WR: <span>58%</span></div>
+              <div class="mock-stat">KDA: <span>3.2</span></div>
+            </div>
+          </div>
+          <div class="mock-actions">
+            <div class="mock-btn play">LOAD</div>
+          </div>
+        </div>
+        <div class="preview-mock-card">
+          <div class="mock-rank dia">&#128142;</div>
+          <div class="mock-info">
+            <div class="mock-name">Main Account <span class="mock-tag">#KR</span></div>
+            <div class="mock-stats">
+              <div class="mock-stat">Rank: <span>Diamond IV</span></div>
+              <div class="mock-stat">WR: <span>52%</span></div>
+              <div class="mock-stat">KDA: <span>4.1</span></div>
+            </div>
+          </div>
+          <div class="mock-actions">
+            <div class="mock-btn play">LOAD</div>
+          </div>
+        </div>
+        <div class="preview-mock-card">
+          <div class="mock-rank gold">&#127941;</div>
+          <div class="mock-info">
+            <div class="mock-name">Chill Account <span class="mock-tag">#EUW</span></div>
+            <div class="mock-stats">
+              <div class="mock-stat">Rank: <span>Gold I</span></div>
+              <div class="mock-stat">WR: <span>61%</span></div>
+              <div class="mock-stat">KDA: <span>2.8</span></div>
+            </div>
+          </div>
+          <div class="mock-actions">
+            <div class="mock-btn play">LOAD</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA / Download -->
+  <section class="cta" id="download">
+    <div class="cta-box">
+      <h2>Ready to get started?</h2>
+      <p>Download Savana for free and take control of your League experience.</p>
+      <a href="#https://github.com/TsRun/Savana/releases/latest/download/Savana-Setup.exe" class="btn-download" id="download-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download for Windows
+      </a>
+      <p style="margin-top: 16px; font-size: 0.8rem; color: #52525b;">v2.0.0 &bull; Windows 10+ &bull; ~80 MB</p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2025 Savana. Built for the League community.</p>
+  </footer>
+
+</body>
+</html>
