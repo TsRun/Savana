@@ -206,16 +206,8 @@ const getTierIcon = (p) => {
     if (p.rankData?.soloq?.tier) tier = p.rankData.soloq.tier;
   }
   
-  if (tier === 'UNRANKED') return null; // Or placeholder
-  // Assuming assets exist. If not, return null.
-  // We can try to reuse existing assets or just not show icon if missing.
-  // Using generic mapping for now assuming assets folder convention
-  return `/assets/ranks/${tier.toLowerCase()}.png`; // Need to check if these exist? 
-  // Wait, I don't recall downloading rank icons. 
-  // Let's assume we don't have them for now or use text only if image fails (HTML img handles missing src gracefully often but better to check).
-  // Actually, let's verify if we have assets later. For now, let's try standard path.
-  // NOTE: If no assets, this img tag will be broken. Just in case, returning null for safety unless I uploaded Icons.
-  return null; 
+  if (tier === 'UNRANKED') return null;
+  return `/assets/ranks/${tier.toLowerCase()}.png`;
 };
 
 const getLP = (p) => {

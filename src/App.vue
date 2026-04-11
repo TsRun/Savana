@@ -88,7 +88,7 @@
               <span v-if="loading" class="loading-spinner"></span>
               <span v-else>Refresh Stats</span>
             </button>
-            <button @click="refreshElo(true)" :disabled="loading" class="btn btn-update-all" title="Force la mise à jour complète de tous les comptes : rangs, niveaux, stats (ignore le cooldown)">
+            <button @click="updateAll" :disabled="loading" class="btn btn-update-all" title="Rafraîchit chaque compte individuellement via l'API Riot">
               <svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
                 <path d="M21.5 2v6h-6"/>
                 <path d="M2.5 22v-6h6"/>
@@ -468,6 +468,101 @@ const refreshElo = async (force = false) => {
     await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value, force }) });
     setTimeout(async () => { await fetchSmurfs(); loading.value = false; showToast('Done!', 'success'); }, 3000);
   } catch (e) { error.value = e.message; loading.value = false; }
+};
+
+const updateAll = async () => {
+  if (smurfs.value.length === 0) return;
+
+  // Sans Electron, fallback sur l'API directe
+  if (!window.electronAPI?.isElectron) {
+    loading.value = true;
+    showToast(`Mise à jour de ${smurfs.value.length} comptes...`, 'info');
+    for (const smurf of smurfs.value) {
+      smurf.is_syncing = true;
+      try {
+        await fetch(`${apiUrl.value}/smurfs/${smurf.id}/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ queue: statsQueue.value, force: true })
+        });
+      } catch (e) { console.error(e); }
+      smurf.is_syncing = false;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    await fetchSmurfs();
+    loading.value = false;
+    showToast('Tous les comptes mis à jour !', 'success');
+    return;
+  }
+
+  const smurfsWithSession = smurfs.value.filter(s => s.hasSession);
+  if (smurfsWithSession.length === 0) {
+    showToast('Aucun compte avec session sauvegardée', 'error');
+    return;
+  }
+
+  const total = smurfsWithSession.length;
+  loading.value = true;
+
+  const setStatus = (msg) => window.electronAPI?.updateLaunchStatus?.({ status: 'loading', message: msg });
+  const clearStatus = () => window.electronAPI?.updateLaunchStatus?.({ status: 'idle' });
+
+  for (let i = 0; i < smurfsWithSession.length; i++) {
+    const smurf = smurfsWithSession[i];
+    const name = smurf.Pseudo?.split('#')[0] || '?';
+    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    if (!filename) continue;
+
+    smurf.is_syncing = true;
+
+    try {
+      const label = `[${i + 1}/${total}] ${name}`;
+
+      // loadSession envoie ses propres messages (avec label) + keepOverlay = true pour éviter le clignotement
+      const loadRes = await window.electronAPI.loadSession(filename, { timeout: 35000, label, keepOverlay: true });
+
+      if (!loadRes.success) {
+        setStatus(`[${i + 1}/${total}] ${name} — Erreur, passage au suivant...`);
+        await new Promise(r => setTimeout(r, 1500));
+        smurf.is_syncing = false;
+        continue;
+      }
+
+      if (loadRes.clientStarted) {
+        // Session valide — re-sauvegarder la session (tokens frais) puis rafraîchir les stats
+        setStatus(`[${i + 1}/${total}] ${name} — Sauvegarde session...`);
+        await window.electronAPI.saveSession(filename);
+
+        setStatus(`[${i + 1}/${total}] ${name} — Mise à jour des stats...`);
+        await fetch(`${apiUrl.value}/smurfs/${smurf.id}/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ queue: statsQueue.value, force: true })
+        });
+
+        setStatus(`[${i + 1}/${total}] ${name} — ✅ Mis à jour !`);
+        await new Promise(r => setTimeout(r, 1200));
+        showToast(`✅ ${name} mis à jour`, 'success');
+      } else {
+        // Client lancé mais pas de connexion → session expirée
+        setStatus(`[${i + 1}/${total}] ${name} — Session expirée, suppression...`);
+        await window.electronAPI.deleteSession(filename);
+        await new Promise(r => setTimeout(r, 1200));
+        showToast(`⚠️ Session expirée supprimée: ${name}`, 'error');
+      }
+    } catch (e) {
+      console.error(`Erreur sur ${smurf.Pseudo}:`, e);
+    }
+
+    smurf.is_syncing = false;
+  }
+
+  clearStatus();
+  await fetchSmurfs();
+  loading.value = false;
+  showToast(`Mise à jour terminée ! (${total} comptes)`, 'success');
 };
 
 const resetClient = async () => {

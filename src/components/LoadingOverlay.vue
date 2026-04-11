@@ -2,8 +2,14 @@
   <div v-if="state.status === 'loading'" class="loading-overlay">
     <div class="loading-content">
       <div class="spinner"></div>
-      <div class="loading-message">{{ state.message }}</div>
-      <div class="loading-sub">Veuillez patienter...</div>
+      <div class="loading-message">{{ mainMessage }}</div>
+      <div v-if="progressInfo" class="loading-progress-bar">
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: progressInfo.pct + '%' }"></div>
+        </div>
+        <span class="progress-label">{{ progressInfo.current }} / {{ progressInfo.total }}</span>
+      </div>
+      <div class="loading-sub">{{ subMessage }}</div>
       <button @click="cancelLoading" class="cancel-btn">
         ✕ Annuler
       </button>
@@ -12,11 +18,30 @@
 </template>
 
 <script setup>
-import { reactive, onMounted, onUnmounted } from 'vue';
+import { reactive, computed, onMounted, onUnmounted } from 'vue';
 
 const state = reactive({
   status: 'idle',
   message: ''
+});
+
+// Parse "[2/9] PlayerName — Sous-message" pour extraire les parties
+const mainMessage = computed(() => {
+  const m = state.message.match(/^(\[\d+\/\d+\]\s+\S+)\s+—\s+(.+)$/);
+  return m ? `${m[1]} — ${m[2]}` : state.message || 'Chargement...';
+});
+
+const subMessage = computed(() => {
+  const m = state.message.match(/^(\[\d+\/\d+\])/);
+  return m ? 'Update All en cours...' : 'Veuillez patienter...';
+});
+
+const progressInfo = computed(() => {
+  const m = state.message.match(/^\[(\d+)\/(\d+)\]/);
+  if (!m) return null;
+  const current = parseInt(m[1]);
+  const total = parseInt(m[2]);
+  return { current, total, pct: Math.round((current / total) * 100) };
 });
 
 let cleanup = null;
@@ -81,6 +106,34 @@ const cancelLoading = () => {
   font-size: 1.25rem;
   font-weight: 600;
   text-align: center;
+}
+
+.loading-progress-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 280px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.progress-label {
+  font-size: 0.75rem;
+  color: #71717a;
 }
 
 .loading-sub {

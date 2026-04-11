@@ -7,7 +7,15 @@
       "Bash(powershell.exe -NoProfile -File - <<'PSEOF'\nGet-Process | Where-Object { $_.Path -and $_.Path.Contains\\('Savana'\\) } | Select-Object Id, ProcessName, Path | Format-Table -AutoSize\nPSEOF)",
       "Bash(powershell.exe -NoProfile -File - <<'PSEOF'\nGet-Process Savana -ErrorAction SilentlyContinue | Stop-Process -Force\nWrite-Host \"All Savana processes killed\"\nPSEOF)",
       "Bash(npm run electron:build:*)",
-      "Bash(copy:*)"
+      "Bash(copy:*)",
+      "Bash(rtk --version)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)",
+      "Bash(echo '')",
+      "Bash(echo '# GitHub CLI')",
+      "Bash(echo 'export PATH=\"$PATH:/c/Program Files/GitHub CLI\"')",
+      "Bash(echo 'export PATH=\"$PATH:/c/Users/Administrator/.local/bin\"')",
+      "Bash(export PATH=\"$PATH:/c/Users/Administrator/.local/bin\")"
     ]
   }
 }

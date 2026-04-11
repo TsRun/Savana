@@ -103,7 +103,7 @@ const steps = [
   {
     target: '.btn-primary',
     title: '⏳ Expiration des sessions',
-    content: 'Les sessions sauvegardées expirent au bout de 4 à 10 jours. Pensez à les re-sauvegarder régulièrement ! Un badge orange (4j+) ou rouge (7j+) apparaîtra sur la carte pour vous prévenir.'
+    content: 'Les sessions sauvegardées expirent au bout de quelques jours. Pensez à les re-sauvegarder régulièrement ! Un badge orange (7j+) ou rouge (14j+) apparaîtra sur la carte pour vous prévenir.'
   },
   {
     target: '.btn-update-all',

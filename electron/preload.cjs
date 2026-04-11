@@ -42,13 +42,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Charger la session pour le smurf
-  loadSession: (filename) => {
-    return ipcRenderer.invoke('load-session', { filename });
+  loadSession: (filename, options = {}) => {
+    return ipcRenderer.invoke('load-session', { filename, ...options });
   },
+
+  // Mettre à jour le statut de l'overlay depuis le renderer
+  updateLaunchStatus: (data) => ipcRenderer.invoke('update-launch-status', data),
 
   // Lister les sessions sauvegardées
   getSavedSessions: () => {
     return ipcRenderer.invoke('get-saved-sessions');
+  },
+
+  // Supprimer la session sauvegardée d'un compte
+  deleteSession: (filename) => {
+    return ipcRenderer.invoke('delete-session', { filename });
   },
 
   // Réinitialiser Riot Client (Kill + Delete session)

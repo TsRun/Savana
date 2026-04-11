@@ -45,6 +45,27 @@
         </div>
         <small class="hint">Collez votre Riot ID complet (Ex: Faker#T1)</small>
         
+        <div class="credentials-section">
+          <label>Identifiants (optionnel)</label>
+          <div class="credentials-inputs">
+            <input
+              v-model="form.username"
+              type="text"
+              placeholder="Username / Email"
+              class="input-field"
+              @focus="clearError()"
+            >
+            <input
+              v-model="form.password"
+              type="text"
+              placeholder="Password"
+              class="input-field"
+              @focus="clearError()"
+            >
+          </div>
+          <small class="hint">Sauvegardés localement pour copie rapide</small>
+        </div>
+
         <!-- Error message display -->
         <div v-if="errorMessage" class="error-message">
              <span>{{ errorMessage }}</span>
@@ -83,14 +104,16 @@ const tagInput = ref(null);
 
 const form = ref({
   gameName: '',
-  tagLine: ''
+  tagLine: '',
+  username: '',
+  password: ''
 });
 
 const { apiUrl } = useApi();
 
 watch(() => props.isOpen, (val) => {
   if (val) {
-    form.value = { gameName: '', tagLine: '' };
+    form.value = { gameName: '', tagLine: '', username: '', password: '' };
     errorMessage.value = '';
     nextTick(() => nameInput.value?.focus());
   }
@@ -193,7 +216,7 @@ async function performSubmit(autoSaveSession = false) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ riotId: fullRiotId })
+      body: JSON.stringify({ riotId: fullRiotId, username: form.value.username.trim(), password: form.value.password.trim() })
     });
     
     const data = await res.json();
@@ -424,6 +447,39 @@ label {
 }
 
 
+
+.credentials-section {
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.credentials-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-field {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
 
 .import-section {
   margin-bottom: 20px;

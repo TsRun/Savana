@@ -12,15 +12,15 @@
       </div>
 
       <!-- Data Freshness Badge -->
-      <div v-if="dataFreshness === 'expired'" class="freshness-badge data-expired" :title="`Dernière mise à jour il y a ${dataAgeDays} jours`">
+      <div v-if="dataFreshness === 'expired'" class="freshness-badge data-expired">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="8" x2="12" y2="12"/>
           <line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
-        <span>{{ dataAgeDays }}j — Obsolète, rafraîchir !</span>
+        <span>{{ dataAgeDays }}j — Obsolète</span>
       </div>
-      <div v-else-if="dataFreshness === 'warning'" class="freshness-badge data-warning" :title="`Dernière mise à jour il y a ${dataAgeDays} jours`">
+      <div v-else-if="dataFreshness === 'warning'" class="freshness-badge data-warning">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
           <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
           <line x1="12" y1="9" x2="12" y2="13"/>
@@ -69,6 +69,32 @@
           <span class="stat-value">{{ rankedGames }}</span>
           <span class="stat-label">Games</span>
         </div>
+      </div>
+    </div>
+
+    <!-- Credentials Section -->
+    <div class="credentials-row" v-if="smurf.UserName || smurf.Password">
+      <div class="credential" v-if="smurf.UserName" @click="$emit('copy', smurf.UserName, 'Username')" title="Copy username">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cred-icon">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span class="cred-text">{{ smurf.UserName }}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+        </svg>
+      </div>
+      <div class="credential" v-if="smurf.Password" @click="$emit('copy', smurf.Password, 'Password')" title="Copy password">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cred-icon">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <span class="cred-text">{{ maskedPassword }}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+        </svg>
       </div>
     </div>
 
@@ -207,8 +233,8 @@ const dataAgeDays = computed(() => {
 
 const dataFreshness = computed(() => {
   if (dataAgeDays.value === null) return 'fresh';
-  if (dataAgeDays.value >= 7) return 'expired';
-  if (dataAgeDays.value >= 4) return 'warning';
+  if (dataAgeDays.value >= 14) return 'expired';
+  if (dataAgeDays.value >= 7) return 'warning';
   return 'fresh';
 });
 
@@ -388,6 +414,13 @@ const getWinrateClass = (wr) => {
 const rankIconStyle = computed(() => {
   return rankData.value.is_estimated ? { opacity: 0.7, filter: 'grayscale(0.5)' } : {};
 });
+
+const maskedPassword = computed(() => {
+  if (!props.smurf.Password) return '';
+  const pw = props.smurf.Password;
+  if (pw.length <= 3) return '•'.repeat(pw.length);
+  return pw.slice(0, 2) + '•'.repeat(Math.min(pw.length - 2, 8));
+});
 </script>
 
 <style scoped>
@@ -542,6 +575,70 @@ const rankIconStyle = computed(() => {
 .wr-high { color: var(--success); }
 .wr-mid { color: var(--warning); }
 .wr-low { color: var(--text-muted); }
+
+/* Credentials Section */
+.credentials-row {
+  display: flex;
+  gap: 6px;
+}
+
+.credential {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.credential:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.credential:active {
+  transform: scale(0.98);
+}
+
+.cred-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.cred-text {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.copy-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.credential:hover .copy-icon {
+  opacity: 1;
+}
+
+.credential:hover .cred-icon {
+  color: var(--accent-primary);
+}
 
 /* Stats Section */
 .stats-section {

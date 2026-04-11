@@ -298,21 +298,20 @@ async function countLeagueClientUxRender() {
   }
 }
 
-async function waitForLeagueClient(timeoutMs = 60000) {
-  const startTime = Date.now();
-  while (Date.now() - startTime < timeoutMs) {
-    const count = await countLeagueClientUxRender();
-    if (count >= 2) return true;
-    await sleep(1000);
-  }
-  return false;
-}
+ipcMain.handle('update-launch-status', (event, data) => {
+  if (mainWindow) mainWindow.webContents.send('launch-status', data);
+});
 
-ipcMain.handle('load-session', async (event, { filename }) => {
+ipcMain.handle('load-session', async (event, { filename, timeout = 60000, label = '', keepOverlay = false }) => {
+  const prefix = label ? `${label} — ` : '';
+  const send = (message) => {
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: `${prefix}${message}` });
+  };
+
   try {
     if (!filename) throw new Error('Filename requis');
 
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Préparation du chargement...' });
+    send('Préparation...');
 
     const sessionDir = getSessionDir(filename);
     const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
@@ -322,7 +321,7 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
 
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Fermeture de Riot Client (2s)...' });
+    send('Fermeture de Riot...');
     await killRiotClient();
     await sleep(2000);
 
@@ -330,14 +329,12 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     for (const p of possiblePaths) {
       const dataDir = p.data;
       if (fs.existsSync(dataDir)) {
-        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Nettoyage des fichiers temporaires...' });
+        send('Nettoyage des fichiers...');
         const files = fs.readdirSync(dataDir);
         for (const file of files) {
-          try {
-            fs.rmSync(path.join(dataDir, file), { recursive: true, force: true });
-          } catch (e) { }
+          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
         }
-        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Injection de la session...' });
+        send('Injection de la session...');
         fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
         restored = true;
       }
@@ -345,20 +342,41 @@ ipcMain.handle('load-session', async (event, { filename }) => {
 
     if (!restored) throw new Error('Dossier Data Riot introuvable pour la restauration');
 
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Lancement de League of Legends...' });
-    try {
+    send('Lancement du client...');
+    try { await sleep(1000); await launchLeague(); } catch (launchErr) { }
+
+    // Attente du client avec countdown
+    const timeoutSec = Math.floor(timeout / 1000);
+    const startTime = Date.now();
+    let clientStarted = false;
+    while (Date.now() - startTime < timeout) {
+      const count = await countLeagueClientUxRender();
+      if (count >= 2) { clientStarted = true; break; }
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      send(`Attente connexion... ${elapsed}s / ${timeoutSec}s`);
       await sleep(1000);
-      await launchLeague();
-    } catch (launchErr) { }
+    }
 
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Attente du démarrage du client...' });
-    const clientStarted = await waitForLeagueClient(60000);
-
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
-    return { success: true, message: 'Session chargée, client lancé !' };
+    if (!keepOverlay) {
+      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+    }
+    return { success: true, clientStarted };
 
   } catch (error) {
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-session', async (event, { filename }) => {
+  try {
+    if (!filename) throw new Error('Filename requis');
+    const sessionDir = path.join(app.getPath('userData'), 'sessions', filename);
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+    return { success: true };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
