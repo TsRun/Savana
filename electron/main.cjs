@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const { extractRiotTokens, killRiotClient, getAllPossibleRiotPaths, launchLeague, getRiotClientExecutable } = require('./riotTokens.cjs');
+const { killRiotClient, getAllPossibleRiotPaths, launchLeague, launchRiotClientOnly, getRiotClientExecutable } = require('./riotTokens.cjs');
 const { autoUpdater } = require('electron-updater');
 
 const execAsync = promisify(exec);
@@ -189,65 +189,131 @@ ipcMain.handle('write-clipboard', (event, text) => {
 // RIOT CLIENT INTEGRATION
 // =====================================================
 
-ipcMain.handle('launch-riot-client', async (event, { username, password }) => {
-  try {
-    const clientPath = getRiotClientExecutable();
-    if (!clientPath) throw new Error('Riot Client non trouvé');
-
-    await injectCredentialsToConfig(RIOT_PATH.config, username, password);
-
-    const command = `"${clientPath}"`;
-    await execAsync(command);
-
-    setTimeout(async () => {
-      await autoFillCredentials(username, password);
-    }, 3000);
-
-    return { success: true, message: 'Client lance avec auto-login' };
-  } catch (error) {
-    console.error('[Riot Client] Erreur:', error);
-    throw error;
-  }
-});
-
-async function injectCredentialsToConfig(configPath, username, password) {
-  try {
-    const autofillConfig = { username: username, remember: true, timestamp: Date.now() };
-    const configFile = path.join(configPath, 'autofill.json');
-
-    if (!fs.existsSync(configPath)) {
-      fs.mkdirSync(configPath, { recursive: true });
-    }
-
-    fs.writeFileSync(configFile, JSON.stringify(autofillConfig, null, 2));
-  } catch (error) {
-    console.error('[Config] Erreur:', error);
-  }
-}
-
-async function autoFillCredentials(username, password) {
-  try {
-    const robot = require('robotjs');
-    await sleep(500);
-    robot.typeString(username);
-    await sleep(300);
-    robot.keyTap('tab');
-    await sleep(200);
-    robot.typeString(password);
-    await sleep(300);
-    robot.keyTap('enter');
-  } catch (error) {
-    console.log('[AutoFill] Non disponible:', error.message);
-  }
-}
-
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Global abort flag — checked by long-running handlers
+let abortFlag = false;
+
+ipcMain.handle('abort-riot-operations', () => {
+  abortFlag = true;
+  return { success: true };
+});
+
+ipcMain.handle('reset-abort-flag', () => {
+  abortFlag = false;
+  return { success: true };
+});
+
 // =====================================================
-// SESSION MANAGEMENT
+// RIOT CLIENT LOCKFILE & AUTH CHECK
 // =====================================================
+
+/**
+ * Parse the Riot Client lockfile to get the local API connection info.
+ * Lockfile format: name:pid:port:password:protocol
+ */
+function parseLockfile() {
+  const lockfilePath = path.join(RIOT_PATH.config, 'lockfile');
+  if (!fs.existsSync(lockfilePath)) return null;
+  try {
+    const content = fs.readFileSync(lockfilePath, 'utf8').trim();
+    const parts = content.split(':');
+    if (parts.length < 5) return null;
+    return { name: parts[0], pid: parts[1], port: parts[2], password: parts[3], protocol: parts[4] };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Check if the Riot Client is logged in by hitting its local API.
+ * Returns { loggedIn: true/false, error?: string }
+ */
+async function checkRiotLogin() {
+  const lock = parseLockfile();
+  if (!lock) return { loggedIn: false, error: 'no lockfile' };
+
+  try {
+    const https = require('https');
+    const auth = Buffer.from(`riot:${lock.password}`).toString('base64');
+    const url = `https://127.0.0.1:${lock.port}/rso-auth/v1/authorization`;
+
+    const result = await new Promise((resolve, reject) => {
+      const req = https.get(url, {
+        headers: { 'Authorization': `Basic ${auth}` },
+        rejectUnauthorized: false
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try {
+              const json = JSON.parse(data);
+              // If we get a valid response with a subject (PUUID), user is logged in
+              resolve({ loggedIn: !!(json.subject || json.accessToken || json.token), puuid: json.subject || null });
+            } catch {
+              resolve({ loggedIn: false });
+            }
+          } else if (res.statusCode === 404) {
+            // Endpoint not found — try alternative check
+            resolve({ loggedIn: false, tryAlt: true });
+          } else {
+            resolve({ loggedIn: false });
+          }
+        });
+      });
+      req.on('error', (e) => resolve({ loggedIn: false, error: e.message }));
+      req.setTimeout(3000, () => { req.destroy(); resolve({ loggedIn: false, error: 'timeout' }); });
+    });
+
+    // If rso-auth didn't work, try /entitlements/v1/token
+    if (result.tryAlt) {
+      const altUrl = `https://127.0.0.1:${lock.port}/entitlements/v1/token`;
+      return await new Promise((resolve) => {
+        const req = https.get(altUrl, {
+          headers: { 'Authorization': `Basic ${auth}` },
+          rejectUnauthorized: false
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                const json = JSON.parse(data);
+                resolve({ loggedIn: !!(json.accessToken || json.token) });
+              } catch { resolve({ loggedIn: false }); }
+            } else {
+              resolve({ loggedIn: false });
+            }
+          });
+        });
+        req.on('error', () => resolve({ loggedIn: false }));
+        req.setTimeout(3000, () => { req.destroy(); resolve({ loggedIn: false }); });
+      });
+    }
+
+    return result;
+  } catch (e) {
+    return { loggedIn: false, error: e.message };
+  }
+}
+
+ipcMain.handle('check-riot-login', async () => {
+  return await checkRiotLogin();
+});
+
+ipcMain.handle('wait-riot-login', async (event, { timeout = 60000 } = {}) => {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    if (abortFlag) return { loggedIn: false };
+    const result = await checkRiotLogin();
+    if (result.loggedIn) return { loggedIn: true };
+    await sleep(2000);
+  }
+  return { loggedIn: false };
+});
 
 // =====================================================
 // SESSION MANAGEMENT
@@ -289,15 +355,6 @@ ipcMain.handle('save-session', async (event, { filename }) => {
   }
 });
 
-async function countLeagueClientUxRender() {
-  try {
-    const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq LeagueClientUxRender.exe"');
-    return (stdout.match(/LeagueClientUxRender/gi) || []).length;
-  } catch {
-    return 0;
-  }
-}
-
 ipcMain.handle('update-launch-status', (event, data) => {
   if (mainWindow) mainWindow.webContents.send('launch-status', data);
 });
@@ -323,18 +380,17 @@ ipcMain.handle('load-session', async (event, { filename, timeout = 60000, label 
 
     send('Fermeture de Riot...');
     await killRiotClient();
-    await sleep(2000);
+    await sleep(500);
 
     let restored = false;
     for (const p of possiblePaths) {
       const dataDir = p.data;
       if (fs.existsSync(dataDir)) {
-        send('Nettoyage des fichiers...');
         const files = fs.readdirSync(dataDir);
         for (const file of files) {
           try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
         }
-        send('Injection de la session...');
+        send('Injection session...');
         fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
         restored = true;
       }
@@ -342,30 +398,139 @@ ipcMain.handle('load-session', async (event, { filename, timeout = 60000, label 
 
     if (!restored) throw new Error('Dossier Data Riot introuvable pour la restauration');
 
-    send('Lancement du client...');
-    try { await sleep(1000); await launchLeague(); } catch (launchErr) { }
+    send('Lancement...');
+    try { await launchLeague(); } catch (launchErr) { }
 
-    // Attente du client avec countdown
-    const timeoutSec = Math.floor(timeout / 1000);
-    const startTime = Date.now();
-    let clientStarted = false;
-    while (Date.now() - startTime < timeout) {
-      const count = await countLeagueClientUxRender();
-      if (count >= 2) { clientStarted = true; break; }
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      send(`Attente connexion... ${elapsed}s / ${timeoutSec}s`);
-      await sleep(1000);
-    }
-
-    if (!keepOverlay) {
-      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
-    }
-    return { success: true, clientStarted };
+    // Don't block — dismiss overlay and let the game start in the background
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+    return { success: true };
 
   } catch (error) {
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: false, error: error.message };
   }
+});
+
+async function countRiotClientUi() {
+  try {
+    // Use PowerShell for reliable detection — tasklist has encoding issues on non-English Windows
+    const { stdout } = await execAsync(
+      'powershell -NoProfile -Command "(Get-Process -Name \'Riot Client\' -ErrorAction SilentlyContinue).Count"'
+    );
+    const count = parseInt(stdout.trim(), 10);
+    if (count > 0) return count;
+    // Fallback: check old process name
+    const { stdout: stdout2 } = await execAsync(
+      'powershell -NoProfile -Command "(Get-Process -Name \'RiotClientUxRender\' -ErrorAction SilentlyContinue).Count"'
+    );
+    return parseInt(stdout2.trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Load session but only open Riot Client (not League) — for bulk save-all flow
+ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 30000, label = '' }) => {
+  const prefix = label ? `${label} — ` : '';
+  const send = (message) => {
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: `${prefix}${message}` });
+  };
+
+  try {
+    if (!filename) throw new Error('Filename requis');
+
+    send('Fermeture de Riot...');
+    await killRiotClient();
+    await sleep(500);
+
+    const sessionDir = getSessionDir(filename);
+    const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
+
+    if (!fs.existsSync(sourcePath)) return { success: false, error: 'no-session' };
+
+    const possiblePaths = getAllPossibleRiotPaths();
+    if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
+
+    let restored = false;
+    for (const p of possiblePaths) {
+      const dataDir = p.data;
+      if (fs.existsSync(dataDir)) {
+        const files = fs.readdirSync(dataDir);
+        for (const file of files) {
+          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
+        }
+        fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        restored = true;
+      }
+    }
+
+    if (!restored) throw new Error('Dossier Data Riot introuvable');
+
+    send('Lancement Riot Client...');
+    await launchRiotClientOnly();
+
+    // Wait for Riot Client UI to appear
+    const timeoutSec = Math.floor(timeout / 1000);
+    const startTime = Date.now();
+    let clientStarted = false;
+    while (Date.now() - startTime < timeout) {
+      if (abortFlag) return { success: false, error: 'aborted' };
+      const count = await countRiotClientUi();
+      if (count >= 1) { clientStarted = true; break; }
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      send(`Attente Riot Client... ${elapsed}s / ${timeoutSec}s`);
+      await sleep(1000);
+    }
+
+    return { success: true, clientStarted };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Launch just the Riot Client (no session injection, for manual login)
+ipcMain.handle('launch-riot-only', async () => {
+  try {
+    await killRiotClient();
+    await sleep(1500);
+
+    // Clear existing session so user gets a fresh login screen
+    const possiblePaths = getAllPossibleRiotPaths();
+    for (const p of possiblePaths) {
+      const dataDir = p.data;
+      if (fs.existsSync(dataDir)) {
+        const files = fs.readdirSync(dataDir);
+        for (const file of files) {
+          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
+        }
+      }
+    }
+
+    await launchRiotClientOnly();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Wait for Riot Client to be connected (RiotClientUxRender running)
+ipcMain.handle('wait-riot-client', async (event, { timeout = 60000, label = '' }) => {
+  const prefix = label ? `${label} — ` : '';
+  const send = (message) => {
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: `${prefix}${message}` });
+  };
+
+  const timeoutSec = Math.floor(timeout / 1000);
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    if (abortFlag) return { connected: false };
+    const count = await countRiotClientUi();
+    if (count >= 1) return { connected: true };
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    send(`Attente connexion... ${elapsed}s / ${timeoutSec}s`);
+    await sleep(1000);
+  }
+  return { connected: false };
 });
 
 ipcMain.handle('delete-session', async (event, { filename }) => {
@@ -428,16 +593,70 @@ ipcMain.handle('reset-riot-client', async () => {
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: 'Lancement du client...' });
     try {
       exec(`"${clientPath}"`);
-      setTimeout(() => {
-        if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
-      }, 8000);
-    } catch (execErr) {
-      if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
-    }
+    } catch (execErr) { }
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
 
     return { success: true, message: deleted ? 'Client réinitialisé' : 'Client relancé' };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+});
+
+// Backup current Riot session YAML to temp
+ipcMain.handle('backup-riot-session', async () => {
+  try {
+    const possiblePaths = getAllPossibleRiotPaths();
+    for (const p of possiblePaths) {
+      const yamlPath = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      if (fs.existsSync(yamlPath)) {
+        const backupDir = path.join(app.getPath('userData'), 'sessions', '_backup');
+        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+        const backupPath = path.join(backupDir, 'RiotGamesPrivateSettings.yaml');
+        fs.copyFileSync(yamlPath, backupPath);
+        return { success: true };
+      }
+    }
+    return { success: false, error: 'no session to backup' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Restore backed up session and relaunch Riot Client
+ipcMain.handle('restore-riot-session', async () => {
+  try {
+    const backupDir = path.join(app.getPath('userData'), 'sessions', '_backup');
+    const backupPath = path.join(backupDir, 'RiotGamesPrivateSettings.yaml');
+    if (!fs.existsSync(backupPath)) return { success: false, error: 'no backup found' };
+
+    await killRiotClient();
+    await sleep(1500);
+
+    // Restore YAML
+    const possiblePaths = getAllPossibleRiotPaths();
+    let restored = false;
+    for (const p of possiblePaths) {
+      const dataDir = p.data;
+      if (fs.existsSync(dataDir)) {
+        // Clear existing
+        for (const file of fs.readdirSync(dataDir)) {
+          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
+        }
+        fs.copyFileSync(backupPath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        restored = true;
+      }
+    }
+
+    if (!restored) return { success: false, error: 'no Riot data dir found' };
+
+    // Clean up backup
+    try { fs.rmSync(backupPath, { force: true }); } catch (e) { }
+
+    // Relaunch Riot Client
+    await launchRiotClientOnly();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

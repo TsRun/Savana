@@ -259,10 +259,6 @@ const deleteFriend = (id) => {
 
 const statsFilter = ref('soloq');
 
-const refreshPlayer = (p) => {
-  if (p.type === 'friend') emit('refresh-friend', { id: p.id, queue: statsFilter.value });
-  else emit('refresh-smurf', { id: p.id, queue: statsFilter.value });
-};
 
 </script>
 

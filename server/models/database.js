@@ -347,6 +347,10 @@ export function updateSmurfData(smurfId, data) {
   }
 
   // Autre
+  if (data.pseudo !== undefined) {
+    fields.push('pseudo = ?');
+    values.push(data.pseudo);
+  }
   if (data.level !== undefined) {
     fields.push('level = ?');
     values.push(data.level);
@@ -411,6 +415,16 @@ export function getSmurfById(smurfId) {
     smurf.stats = JSON.parse(smurf.stats);
   }
   return smurf;
+}
+
+/**
+ * Met à jour les identifiants d'un smurf
+ */
+export function updateSmurfCredentials(smurfId, username, password) {
+  db.run('UPDATE smurfs SET username = ?, password = ? WHERE id = ?', [username, password, smurfId]);
+  const changes = db.getRowsModified();
+  saveDatabase();
+  return changes > 0;
 }
 
 /**
@@ -568,6 +582,7 @@ export default {
   addSmurf,
   getUserSmurfs,
   updateSmurfData,
+  updateSmurfCredentials,
   updateSmurfPuuid,
   updateSmurfTokens,
   deleteSmurf,

@@ -1,39 +1,24 @@
 <template>
-  <div v-if="state.status === 'loading'" class="loading-overlay">
-    <div class="loading-content">
-      <div class="spinner"></div>
-      <div class="loading-message">{{ mainMessage }}</div>
-      <div v-if="progressInfo" class="loading-progress-bar">
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: progressInfo.pct + '%' }"></div>
+  <Transition name="statusbar">
+    <div v-if="state.status === 'loading'" class="status-bar">
+      <div class="status-spinner"></div>
+      <span class="status-text">{{ state.message || 'Chargement...' }}</span>
+      <div v-if="progressInfo" class="status-progress">
+        <div class="status-progress-track">
+          <div class="status-progress-fill" :style="{ width: progressInfo.pct + '%' }"></div>
         </div>
-        <span class="progress-label">{{ progressInfo.current }} / {{ progressInfo.total }}</span>
+        <span class="status-progress-label">{{ progressInfo.current }}/{{ progressInfo.total }}</span>
       </div>
-      <div class="loading-sub">{{ subMessage }}</div>
-      <button @click="cancelLoading" class="cancel-btn">
-        ✕ Annuler
-      </button>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <script setup>
-import { reactive, computed, onMounted, onUnmounted } from 'vue';
+import { reactive, computed, onMounted } from 'vue';
 
 const state = reactive({
   status: 'idle',
   message: ''
-});
-
-// Parse "[2/9] PlayerName — Sous-message" pour extraire les parties
-const mainMessage = computed(() => {
-  const m = state.message.match(/^(\[\d+\/\d+\]\s+\S+)\s+—\s+(.+)$/);
-  return m ? `${m[1]} — ${m[2]}` : state.message || 'Chargement...';
-});
-
-const subMessage = computed(() => {
-  const m = state.message.match(/^(\[\d+\/\d+\])/);
-  return m ? 'Update All en cours...' : 'Veuillez patienter...';
 });
 
 const progressInfo = computed(() => {
@@ -44,127 +29,92 @@ const progressInfo = computed(() => {
   return { current, total, pct: Math.round((current / total) * 100) };
 });
 
-let cleanup = null;
-
 onMounted(() => {
   if (window.electronAPI?.onLaunchStatus) {
-    cleanup = window.electronAPI.onLaunchStatus((data) => {
+    window.electronAPI.onLaunchStatus((data) => {
       state.status = data.status;
       state.message = data.message || 'Chargement...';
     });
   }
 });
-
-onUnmounted(() => {
-  // Cleanup logic if needed
-});
-
-const cancelLoading = () => {
-  // Reset the loading state
-  state.status = 'idle';
-  state.message = '';
-  
-  // Try to kill any Riot processes if possible
-  if (window.electronAPI?.cancelLaunch) {
-    window.electronAPI.cancelLaunch();
-  }
-};
 </script>
 
 <style scoped>
-.loading-overlay {
+.status-bar {
   position: fixed;
-  inset: 0;
-  background: rgba(10, 10, 15, 0.95);
-  backdrop-filter: blur(10px);
-  z-index: 9999;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  animation: fadeIn 0.3s ease;
+  gap: 10px;
+  padding: 10px 20px;
+  background: rgba(17, 17, 27, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  z-index: 300;
+  max-width: 500px;
+  pointer-events: none;
 }
 
-.loading-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-}
-
-.spinner {
-  width: 60px;
-  height: 60px;
-  border: 4px solid rgba(99, 102, 241, 0.1);
+.status-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(99, 102, 241, 0.2);
   border-top-color: #6366f1;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  box-shadow: 0 0 30px rgba(99, 102, 241, 0.2);
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 
-.loading-message {
-  color: white;
-  font-size: 1.25rem;
-  font-weight: 600;
-  text-align: center;
+.status-text {
+  color: #d4d4d8;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.loading-progress-bar {
+.status-progress {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 6px;
-  width: 280px;
+  flex-shrink: 0;
 }
 
-.progress-track {
-  width: 100%;
-  height: 4px;
+.status-progress-track {
+  width: 60px;
+  height: 3px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   overflow: hidden;
 }
 
-.progress-fill {
+.status-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #6366f1, #8b5cf6);
   border-radius: 2px;
   transition: width 0.4s ease;
 }
 
-.progress-label {
-  font-size: 0.75rem;
+.status-progress-label {
+  font-size: 0.7rem;
   color: #71717a;
 }
 
-.loading-sub {
-  color: #a1a1aa;
-  font-size: 0.875rem;
-}
-
-.cancel-btn {
-  margin-top: 20px;
-  padding: 10px 24px;
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.5);
-  color: #ef4444;
-  font-size: 0.875rem;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.cancel-btn:hover {
-  background: rgba(239, 68, 68, 0.4);
-  border-color: #ef4444;
-}
+/* Transitions */
+.statusbar-enter-active { animation: slideUp 0.25s ease; }
+.statusbar-leave-active { animation: slideUp 0.2s ease reverse; }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 </style>

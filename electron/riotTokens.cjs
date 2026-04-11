@@ -23,19 +23,17 @@ function getAllPossibleRiotPaths() {
  * Tue tous les processus Riot/League (Windows)
  */
 async function killRiotClient() {
-  const DURATION = 5000;
-  const startTime = Date.now();
+  console.log('[Kill] Arrêt des processus Riot/LoL...');
 
-  console.log('[Kill] Arrêt des processus Riot/LoL (5s)...');
+  const cmd = 'taskkill /F /IM RiotClientServices.exe /IM "Riot Client.exe" /IM LeagueClient.exe /IM "League of Legends.exe" /IM LeagueClientUx.exe /IM LeagueCrashHandler.exe /IM LeagueClientUxRender.exe /IM RiotClientUx.exe /IM RiotClientUxRender.exe /IM RiotClientCrashHandler.exe /T 2>nul';
 
-  while (Date.now() - startTime < DURATION) {
-    try {
-      await execPromise('taskkill /F /IM RiotClientServices.exe /IM LeagueClient.exe /IM "League of Legends.exe" /IM LeagueClientUx.exe /IM LeagueCrashHandler.exe /IM LeagueClientUxRender.exe /IM RiotClientUx.exe /IM RiotClientUxRender.exe /IM RiotClientCrashHandler.exe /T 2>nul').catch(() => { });
-    } catch (e) {
-      // Ignorer les erreurs (process non trouvé)
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
+  // First kill pass
+  try { await execPromise(cmd); } catch (e) { /* process not found is fine */ }
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // Second pass to catch stragglers
+  try { await execPromise(cmd); } catch (e) { }
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   console.log('[Kill] Processus arrêtés.');
 }
@@ -142,10 +140,25 @@ async function extractRiotTokens() {
   }
 }
 
+/**
+ * Lance juste le Riot Client (sans lancer League)
+ */
+async function launchRiotClientOnly() {
+  const clientPath = getRiotClientExecutable();
+  if (!clientPath) {
+    throw new Error('Riot Client introuvable');
+  }
+
+  console.log('[Launch] Lancement du Riot Client uniquement:', clientPath);
+  exec(`"${clientPath}"`);
+  return true;
+}
+
 module.exports = {
   extractRiotTokens,
   killRiotClient,
   getAllPossibleRiotPaths,
   launchLeague,
+  launchRiotClientOnly,
   getRiotClientExecutable
 };

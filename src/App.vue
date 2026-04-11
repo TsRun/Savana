@@ -84,22 +84,11 @@
                   <option value="all">All</option>
               </select>
             </div>
-            <button @click="refreshElo(false)" :disabled="loading" class="btn btn-ghost" title="Rafraîchir les stats (respecte le cooldown de 10 min)">
-              <span v-if="loading" class="loading-spinner"></span>
-              <span v-else>Refresh Stats</span>
+            <button @click="openAddModal" class="btn btn-add-account" title="Add a new account by Riot ID">
+              + Add Account
             </button>
-            <button @click="updateAll" :disabled="loading" class="btn btn-update-all" title="Rafraîchit chaque compte individuellement via l'API Riot">
-              <svg v-if="!loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
-                <path d="M21.5 2v6h-6"/>
-                <path d="M2.5 22v-6h6"/>
-                <path d="M2 11.5a10 10 0 0118.8-4.3L21.5 8"/>
-                <path d="M22 12.5a10 10 0 01-18.8 4.3L2.5 16"/>
-              </svg>
-              <span v-if="loading" class="loading-spinner"></span>
-              <span v-else>Update All</span>
-            </button>
-            <button @click="saveCurrentAccount" class="btn btn-primary" title="Sauvegarde le compte actuellement connecté au Riot Client">
-              💾 Save Account
+            <button @click="saveAllSessions" :disabled="loading" class="btn btn-primary" title="Re-login each account via Riot Client and re-save their sessions. Uses existing sessions first, falls back to manual login.">
+              Resave All
             </button>
             <button @click="resetClient" class="btn btn-danger-outline" title="Ferme Riot + LoL et supprime la session active">
               Logout
@@ -117,6 +106,7 @@
             @delete="deleteSmurf"
             @save-session="handleSaveSession"
             @load-session="handleLoadSession"
+            @update-credentials="handleUpdateCredentials"
           />
         </div>
         <div v-if="filteredSmurfs.length === 0 && !loading" class="empty-state">
@@ -144,15 +134,19 @@
     </div>
     <AddSmurfModal :isOpen="showAddModal" @close="showAddModal = false" @smurf-added="handleSmurfAdded" @session-saved="handleSessionSaved" />
     <AddFriendModal :isOpen="showAddFriendModal" @close="showAddFriendModal = false" @friend-added="fetchFriends" />
-    <ConfirmDialog 
-      :isOpen="confirmDialog.isOpen" 
+    <ConfirmDialog
+      :isOpen="confirmDialog.isOpen"
       :title="confirmDialog.title"
       :message="confirmDialog.message"
       :confirmText="confirmDialog.confirmText"
       :cancelText="confirmDialog.cancelText"
+      :thirdText="confirmDialog.thirdText"
+      :inputs="confirmDialog.inputs"
+      :autoConfirm="confirmDialog.autoConfirm"
       :type="confirmDialog.type"
       @confirm="handleDialogConfirm"
       @cancel="handleDialogCancel"
+      @third="handleDialogThird"
     />
     <div class="toast-container">
       <div v-for="toast in toasts" :key="toast.id" :class="['toast', 'toast-' + toast.type]">{{ toast.message }}</div>
@@ -182,8 +176,6 @@ const friends = ref([]);
 const loading = ref(false);
 const loadingFriends = ref(false);
 const error = ref(null);
-const sortKey = ref('soloq');
-const sortBy = ref('soloq');
 const displayRank = ref('soloq');
 const searchQuery = ref('');
 const isAuthenticated = ref(false);
@@ -194,6 +186,21 @@ const toasts = ref([]);
 const currentView = ref('accounts');
 const showSmurfsInFriends = ref(false);
 const statsQueue = ref('soloq');
+const globalCancelled = ref(false);
+
+const handleGlobalCancel = () => {
+  globalCancelled.value = true;
+  loading.value = false;
+  // Abort all long-running main process operations immediately
+  window.electronAPI?.abortRiotOperations?.();
+  // Kill Riot Client
+  window.electronAPI?.resetRiotClient?.();
+  // If a confirm dialog is open, close it as 'third' (cancel all)
+  if (confirmDialog.value.isOpen && confirmDialog.value.onThird) {
+    confirmDialog.value.onThird({});
+    confirmDialog.value.isOpen = false;
+  }
+};
 
 // When user changes the queue filter, update backend preferences and re-fetch
 watch(statsQueue, async (newQueue) => {
@@ -217,8 +224,13 @@ const confirmDialog = ref({
   message: '',
   confirmText: 'Confirmer',
   cancelText: 'Annuler',
+  thirdText: '',
+  inputs: [],
+  autoConfirm: 0,
   type: 'info',
-  onConfirm: null
+  onConfirm: null,
+  onCancel: null,
+  onThird: null
 });
 
 const showConfirm = (options) => {
@@ -229,20 +241,36 @@ const showConfirm = (options) => {
       message: options.message || 'Êtes-vous sûr ?',
       confirmText: options.confirmText || 'Confirmer',
       cancelText: options.cancelText || 'Annuler',
+      thirdText: options.thirdText || '',
+      inputs: options.inputs || [],
+      autoConfirm: 0,
       type: options.type || 'info',
-      onConfirm: () => resolve(true)
+      onConfirm: (data) => resolve({ action: 'confirm', data }),
+      onCancel: (data) => resolve({ action: 'cancel', data }),
+      onThird: (data) => resolve({ action: 'third', data })
     };
-    confirmDialog.value.onCancel = () => resolve(false);
   });
 };
 
-const handleDialogConfirm = () => {
-  if (confirmDialog.value.onConfirm) confirmDialog.value.onConfirm();
+// Trigger autoConfirm on the dialog (increments counter to trigger the watcher)
+const triggerAutoConfirm = () => {
+  if (confirmDialog.value.isOpen) {
+    confirmDialog.value.autoConfirm++;
+  }
+};
+
+const handleDialogConfirm = (data) => {
+  if (confirmDialog.value.onConfirm) confirmDialog.value.onConfirm(data);
   confirmDialog.value.isOpen = false;
 };
 
-const handleDialogCancel = () => {
-  if (confirmDialog.value.onCancel) confirmDialog.value.onCancel();
+const handleDialogCancel = (data) => {
+  if (confirmDialog.value.onCancel) confirmDialog.value.onCancel(data);
+  confirmDialog.value.isOpen = false;
+};
+
+const handleDialogThird = (data) => {
+  if (confirmDialog.value.onThird) confirmDialog.value.onThird(data);
   confirmDialog.value.isOpen = false;
 };
 
@@ -305,11 +333,6 @@ const filteredSmurfs = computed(() => {
   return result;
 });
 
-
-const handleSortChange = () => {
-    if (sortBy.value === 'flex') displayRank.value = 'flex';
-    if (sortBy.value === 'soloq') displayRank.value = 'soloq';
-};
 
 const showToast = (message, type = 'info') => {
   const id = Date.now();
@@ -470,101 +493,6 @@ const refreshElo = async (force = false) => {
   } catch (e) { error.value = e.message; loading.value = false; }
 };
 
-const updateAll = async () => {
-  if (smurfs.value.length === 0) return;
-
-  // Sans Electron, fallback sur l'API directe
-  if (!window.electronAPI?.isElectron) {
-    loading.value = true;
-    showToast(`Mise à jour de ${smurfs.value.length} comptes...`, 'info');
-    for (const smurf of smurfs.value) {
-      smurf.is_syncing = true;
-      try {
-        await fetch(`${apiUrl.value}/smurfs/${smurf.id}/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ queue: statsQueue.value, force: true })
-        });
-      } catch (e) { console.error(e); }
-      smurf.is_syncing = false;
-      await new Promise(r => setTimeout(r, 500));
-    }
-    await fetchSmurfs();
-    loading.value = false;
-    showToast('Tous les comptes mis à jour !', 'success');
-    return;
-  }
-
-  const smurfsWithSession = smurfs.value.filter(s => s.hasSession);
-  if (smurfsWithSession.length === 0) {
-    showToast('Aucun compte avec session sauvegardée', 'error');
-    return;
-  }
-
-  const total = smurfsWithSession.length;
-  loading.value = true;
-
-  const setStatus = (msg) => window.electronAPI?.updateLaunchStatus?.({ status: 'loading', message: msg });
-  const clearStatus = () => window.electronAPI?.updateLaunchStatus?.({ status: 'idle' });
-
-  for (let i = 0; i < smurfsWithSession.length; i++) {
-    const smurf = smurfsWithSession[i];
-    const name = smurf.Pseudo?.split('#')[0] || '?';
-    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
-    if (!filename) continue;
-
-    smurf.is_syncing = true;
-
-    try {
-      const label = `[${i + 1}/${total}] ${name}`;
-
-      // loadSession envoie ses propres messages (avec label) + keepOverlay = true pour éviter le clignotement
-      const loadRes = await window.electronAPI.loadSession(filename, { timeout: 35000, label, keepOverlay: true });
-
-      if (!loadRes.success) {
-        setStatus(`[${i + 1}/${total}] ${name} — Erreur, passage au suivant...`);
-        await new Promise(r => setTimeout(r, 1500));
-        smurf.is_syncing = false;
-        continue;
-      }
-
-      if (loadRes.clientStarted) {
-        // Session valide — re-sauvegarder la session (tokens frais) puis rafraîchir les stats
-        setStatus(`[${i + 1}/${total}] ${name} — Sauvegarde session...`);
-        await window.electronAPI.saveSession(filename);
-
-        setStatus(`[${i + 1}/${total}] ${name} — Mise à jour des stats...`);
-        await fetch(`${apiUrl.value}/smurfs/${smurf.id}/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ queue: statsQueue.value, force: true })
-        });
-
-        setStatus(`[${i + 1}/${total}] ${name} — ✅ Mis à jour !`);
-        await new Promise(r => setTimeout(r, 1200));
-        showToast(`✅ ${name} mis à jour`, 'success');
-      } else {
-        // Client lancé mais pas de connexion → session expirée
-        setStatus(`[${i + 1}/${total}] ${name} — Session expirée, suppression...`);
-        await window.electronAPI.deleteSession(filename);
-        await new Promise(r => setTimeout(r, 1200));
-        showToast(`⚠️ Session expirée supprimée: ${name}`, 'error');
-      }
-    } catch (e) {
-      console.error(`Erreur sur ${smurf.Pseudo}:`, e);
-    }
-
-    smurf.is_syncing = false;
-  }
-
-  clearStatus();
-  await fetchSmurfs();
-  loading.value = false;
-  showToast(`Mise à jour terminée ! (${total} comptes)`, 'success');
-};
-
 const resetClient = async () => {
   const confirmed = await showConfirm({
     title: 'Réinitialiser le client',
@@ -573,9 +501,9 @@ const resetClient = async () => {
     cancelText: 'Annuler',
     type: 'warning'
   });
-  
-  if (!confirmed) return;
-  
+
+  if (confirmed.action !== 'confirm') return;
+
   showToast('Réinitialisation...', 'info');
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
@@ -590,57 +518,220 @@ const resetClient = async () => {
   }
 };
 
-const saveCurrentAccount = async () => {
-  showToast('Détection du compte...', 'info');
+const saveAllSessions = async () => {
+  if (!window.electronAPI?.isElectron) {
+    showToast('Disponible uniquement sur l\'application Desktop', 'error');
+    return;
+  }
+
+  if (smurfs.value.length === 0) {
+    showToast('Aucun compte a sauvegarder', 'error');
+    return;
+  }
+
+  const confirmed = await showConfirm({
+    title: 'Resave All Sessions',
+    message: `Re-login each account via Riot Client and resave their sessions.\nAccounts with an existing session will be tried first. Others will open Riot Client for manual login.\n\nContinue?`,
+    confirmText: 'Lancer',
+    cancelText: 'Annuler',
+    type: 'info'
+  });
+  if (confirmed.action !== 'confirm') return;
+
+  globalCancelled.value = false;
+  await window.electronAPI?.resetAbortFlag?.();
+  const total = smurfs.value.length;
+  let saved = 0;
+  let skipped = 0;
+  let cancelled = false;
+  let originalSessionPuuid = null;
+
+  // Check if Riot Client is already logged in — save that account first without killing
   try {
-    if (!window.electronAPI?.isElectron) {
-      throw new Error('Disponible uniquement sur l\'application Desktop');
-    }
-    
-    // 1. Récupérer le compte actuellement connecté
-    const accountRes = await fetch(apiUrl.value + '/riot-client/current-account', { credentials: 'include' });
-    if (!accountRes.ok) {
-      const err = await accountRes.json();
-      throw new Error(err.error || 'Impossible de détecter le compte');
-    }
-    
-    const accountData = await accountRes.json();
-    const riotId = `${accountData.gameName}#${accountData.tagLine}`;
-    
-    // 2. Créer/Mettre à jour l'entrée smurf via l'API
-    const addRes = await fetch(apiUrl.value + '/smurfs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        pseudo: accountData.gameName,
-        tag: accountData.tagLine,
-        puuid: accountData.puuid
-      })
-    });
-    
-    if (!addRes.ok) {
-      const err = await addRes.json();
-      // Si déjà existant, on continue quand même pour sauvegarder la session
-      if (!err.error?.includes('existe')) {
-        throw new Error(err.error || 'Erreur lors de l\'ajout');
+    const loginCheck = await window.electronAPI.checkRiotLogin();
+    if (loginCheck.loggedIn && loginCheck.puuid) {
+      originalSessionPuuid = loginCheck.puuid;
+      // Backup the current session so we can restore it at the end
+      await window.electronAPI.backupRiotSession();
+
+      // Find matching account and save its session immediately
+      const currentAccount = smurfs.value.find(s => s.PUUID === originalSessionPuuid);
+      if (currentAccount) {
+        const name = currentAccount.Pseudo?.split('#')[0] || '?';
+        const filename = currentAccount.Pseudo ? getSafeFilename(currentAccount.Pseudo) : null;
+        if (filename) {
+          const saveRes = await window.electronAPI.saveSession(filename);
+          if (saveRes.success) {
+            saved++;
+            showToast(`${name} — Session saved (already connected)`, 'success');
+          }
+        }
       }
     }
-    
-    // 3. Sauvegarder la session via Electron
-    const filename = getSafeFilename(accountData.gameName);
-    const saveRes = await window.electronAPI.saveSession(filename);
-    
-    if (!saveRes.success) {
-      throw new Error(saveRes.error || 'Erreur sauvegarde session');
-    }
-    
-    await fetchSmurfs(); // Refresh la liste immédiat
-    showToast(`✅ ${riotId} sauvegardé ! Récupération des données...`, 'success');
-    // Re-fetch après un délai pour laisser le scheduler récupérer level/rank
-    setTimeout(async () => { await fetchSmurfs(); }, 4000);
   } catch (e) {
-    showToast('❌ ' + e.message, 'error');
+    console.error('Pre-check error:', e);
+  }
+
+  for (let i = 0; i < smurfs.value.length; i++) {
+    if (globalCancelled.value) { cancelled = true; break; }
+
+    // Skip the account that was already saved at the start
+    if (smurfs.value[i].PUUID === originalSessionPuuid) continue;
+
+    const smurf = smurfs.value[i];
+    const name = smurf.Pseudo?.split('#')[0] || '?';
+    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    if (!filename) { skipped++; continue; }
+
+    const label = `[${i + 1}/${total}] ${name}`;
+    smurf.is_syncing = true;
+
+    try {
+      let autoLoggedIn = false;
+
+      // Step 1: Kill Riot + Launch with session or clean
+      if (smurf.hasSession) {
+        showToast(`${name} — Chargement session...`, 'info');
+        const loadRes = await window.electronAPI.loadSessionRiotOnly(filename, { timeout: 25000, label });
+        if (globalCancelled.value) { smurf.is_syncing = false; cancelled = true; break; }
+        if (loadRes.success && loadRes.clientStarted) {
+          const loginCheck = await window.electronAPI.checkRiotLogin();
+          if (globalCancelled.value) { smurf.is_syncing = false; cancelled = true; break; }
+          autoLoggedIn = loginCheck.loggedIn;
+        }
+      }
+
+      if (globalCancelled.value) { smurf.is_syncing = false; cancelled = true; break; }
+
+      if (!autoLoggedIn) {
+        // No session or session didn't work — launch clean for manual login
+        if (!smurf.hasSession) {
+          showToast(`${name} — Ouverture Riot Client...`, 'info');
+          await window.electronAPI.launchRiotOnly();
+          if (globalCancelled.value) { smurf.is_syncing = false; cancelled = true; break; }
+        }
+
+        // Poll for login in background — auto-close dialog when user logs in
+        let dialogResolved = false;
+        window.electronAPI.waitRiotLogin({ timeout: 120000 }).then(res => {
+          if (dialogResolved) return;
+          if (res.loggedIn) triggerAutoConfirm();
+        });
+
+        // Show dialog — user logs in manually while filling credentials
+        const { action, data } = await showConfirm({
+          title: `${label}`,
+          message: 'Connectez-vous manuellement au Riot Client.\nLa connexion sera detectee automatiquement.',
+          confirmText: 'Save',
+          cancelText: 'Skip',
+          thirdText: 'Cancel All',
+          inputs: [
+            { key: 'username', label: 'Username', placeholder: 'Riot username', value: smurf.UserName || '' },
+            { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: smurf.Password || '' }
+          ],
+          type: 'info'
+        });
+        dialogResolved = true;
+
+        // Save credentials if changed
+        const newUser = (data?.username || '').trim();
+        const newPass = (data?.password || '').trim();
+        if (newUser !== (smurf.UserName || '') || newPass !== (smurf.Password || '')) {
+          try {
+            await fetch(`${apiUrl.value}/smurfs/${smurf.id}/credentials`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ username: newUser, password: newPass })
+            });
+            smurf.UserName = newUser;
+            smurf.Password = newPass;
+          } catch (e) { console.error('Credential save error:', e); }
+        }
+
+        if (action === 'third' || globalCancelled.value) {
+          smurf.is_syncing = false;
+          cancelled = true;
+          break;
+        }
+        if (action !== 'confirm') {
+          smurf.is_syncing = false;
+          skipped++;
+          continue;
+        }
+      } else {
+        // Auto-logged in via session — still show quick dialog for credential editing
+        const { action, data } = await showConfirm({
+          title: `${label}`,
+          message: 'Connecte automatiquement via session existante.',
+          confirmText: 'Save',
+          cancelText: 'Skip',
+          thirdText: 'Cancel All',
+          inputs: [
+            { key: 'username', label: 'Username', placeholder: 'Riot username', value: smurf.UserName || '' },
+            { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: smurf.Password || '' }
+          ],
+          type: 'info'
+        });
+
+        // Save credentials if changed
+        const newUser = (data?.username || '').trim();
+        const newPass = (data?.password || '').trim();
+        if (newUser !== (smurf.UserName || '') || newPass !== (smurf.Password || '')) {
+          try {
+            await fetch(`${apiUrl.value}/smurfs/${smurf.id}/credentials`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ username: newUser, password: newPass })
+            });
+            smurf.UserName = newUser;
+            smurf.Password = newPass;
+          } catch (e) { console.error('Credential save error:', e); }
+        }
+
+        if (action === 'third' || globalCancelled.value) {
+          smurf.is_syncing = false;
+          cancelled = true;
+          break;
+        }
+        if (action !== 'confirm') {
+          smurf.is_syncing = false;
+          skipped++;
+          continue;
+        }
+      }
+
+      // Save the session
+      await new Promise(r => setTimeout(r, 1000));
+      const saveRes = await window.electronAPI.saveSession(filename);
+      if (saveRes.success) {
+        saved++;
+        showToast(`${name} — Session saved`, 'success');
+      } else {
+        showToast(`${name} — Erreur sauvegarde: ${saveRes.error}`, 'error');
+      }
+    } catch (e) {
+      console.error(`Save all error for ${name}:`, e);
+    }
+
+    smurf.is_syncing = false;
+  }
+
+  // Restore the original session that was active before the flow
+  if (originalSessionPuuid) {
+    try {
+      await window.electronAPI.restoreRiotSession();
+    } catch (e) {
+      console.error('Restore session error:', e);
+    }
+  }
+
+  await fetchSmurfs();
+  if (cancelled) {
+    showToast(`Annule. ${saved} sauvegarde(s) avant annulation.`, 'info');
+  } else {
+    showToast(`Termine ! ${saved} sauvegarde(s), ${skipped} passe(s)`, 'success');
   }
 };
 
@@ -664,6 +755,22 @@ const handleCopy = async (text, type) => {
   }
 };
 
+const handleUpdateCredentials = async ({ id, username, password }) => {
+  try {
+    const res = await fetch(`${apiUrl.value}/smurfs/${id}/credentials`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password })
+    });
+    if (!res.ok) throw new Error('Failed to update');
+    await fetchSmurfs();
+    showToast('Credentials updated', 'success');
+  } catch (e) {
+    showToast('Failed to update credentials', 'error');
+  }
+};
+
 const deleteSmurf = async (smurfId) => {
   const confirmed = await showConfirm({
     title: 'Supprimer le compte',
@@ -672,9 +779,9 @@ const deleteSmurf = async (smurfId) => {
     cancelText: 'Annuler',
     type: 'danger'
   });
-  
-  if (!confirmed) return;
-  
+
+  if (confirmed.action !== 'confirm') return;
+
   try {
     const res = await fetch(apiUrl.value + '/smurfs/' + smurfId, { method: 'DELETE', credentials: 'include' });
     if (res.ok) { await fetchSmurfs(); showToast('Compte supprimé', 'success'); }
@@ -721,9 +828,9 @@ const handleLoadSession = async (smurf) => {
     cancelText: 'Annuler',
     type: 'info'
   });
-  
-  if (!confirmed) return;
-  
+
+  if (confirmed.action !== 'confirm') return;
+
   showToast('Chargement de la session...', 'info');
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
@@ -781,7 +888,6 @@ onMounted(async () => {
 <style scoped>
 .app-container { height: 100%; width: 100%; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; }
 .titlebar { -webkit-app-region: drag; height: 32px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; padding-left: 16px; flex-shrink: 0; }
-.titlebar-icon { font-size: 14px; }
 .titlebar-title { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-secondary); }
 .titlebar-controls { -webkit-app-region: no-drag; display: flex; height: 100%; }
 .titlebar-btn { width: 46px; height: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; transition: background-color 0.1s ease, color 0.1s ease; }
@@ -794,15 +900,12 @@ onMounted(async () => {
 .sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; }
 .sidebar-header { padding: 24px; border-bottom: 1px solid var(--border-subtle); }
 .logo { display: flex; align-items: center; gap: 16px; }
-.logo-icon-box { width: 40px; height: 40px; background: var(--accent-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem; color: white; }
 .logo-img { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; }
 .logo-text { display: flex; flex-direction: column; }
 .logo-title { font-weight: 700; font-size: 1rem; color: var(--text-primary); }
 .logo-subtitle { font-size: 0.75rem; color: var(--text-muted); }
 .titlebar-icon { width: 24px; height: 24px; background: var(--accent-gradient); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.625rem; color: white; }
 .titlebar-logo { width: 20px; height: 20px; border-radius: 4px; object-fit: contain; }
-.loading-spinner { width: 14px; height: 14px; border: 2px solid var(--text-muted); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .sidebar-nav { flex: 1; padding: 16px; }
 .nav-item { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-radius: 10px; color: var(--text-secondary); font-weight: 500; text-decoration: none; transition: background-color 0.15s ease, color 0.15s ease; }
 .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
@@ -835,14 +938,9 @@ onMounted(async () => {
 .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; }
 .btn-primary { background: var(--accent-gradient); color: white; }
 .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-.btn-ghost:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 .btn-danger-outline { background: transparent; color: var(--error); border: 1px solid var(--error); margin-right: 8px; }
 .btn-danger-outline:hover { background: rgba(239, 68, 68, 0.1); }
-.btn-update-all { background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.15)); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); display: inline-flex; align-items: center; gap: 6px; }
-.btn-update-all:hover { background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(217, 119, 6, 0.25)); border-color: #f59e0b; transform: translateY(-1px); }
+.btn-add-account { background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.15)); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }
+.btn-add-account:hover { background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.25)); border-color: #10b981; transform: translateY(-1px); }
 .select-input { padding: 8px 12px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; outline: none; font-size: 0.875rem; cursor: pointer; }
-.toggle-btn { background: transparent; color: var(--text-muted); transition: all 0.2s; }
-.toggle-btn:hover { color: var(--text-primary); }
-.toggle-btn.active { background: var(--bg-secondary); color: var(--accent-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
 </style>

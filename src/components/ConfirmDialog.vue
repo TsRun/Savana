@@ -20,8 +20,22 @@
           </svg>
         </div>
         <h3 class="confirm-title">{{ title }}</h3>
-        <p class="confirm-message">{{ message }}</p>
+        <p class="confirm-message" style="white-space: pre-line;">{{ message }}</p>
+        <div v-if="inputs.length" class="confirm-inputs">
+          <div v-for="input in inputs" :key="input.key" class="confirm-input-group">
+            <label class="confirm-input-label">{{ input.label }}</label>
+            <input
+              :type="input.type || 'text'"
+              :placeholder="input.placeholder || ''"
+              v-model="inputValues[input.key]"
+              class="confirm-input"
+            />
+          </div>
+        </div>
         <div class="confirm-actions">
+          <button v-if="thirdText" @click="handleThird" class="btn btn-danger-sm">
+            {{ thirdText }}
+          </button>
           <button @click="handleCancel" class="btn btn-secondary">
             {{ cancelText }}
           </button>
@@ -35,7 +49,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, reactive, watch } from 'vue';
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -43,18 +57,39 @@ const props = defineProps({
   message: { type: String, default: 'Êtes-vous sûr ?' },
   confirmText: { type: String, default: 'Confirmer' },
   cancelText: { type: String, default: 'Annuler' },
+  thirdText: { type: String, default: '' },
+  inputs: { type: Array, default: () => [] },
+  autoConfirm: { type: Number, default: 0 },
   type: { type: String, default: 'info' } // 'info', 'warning', 'danger'
 });
 
-const emit = defineEmits(['confirm', 'cancel']);
+const emit = defineEmits(['confirm', 'cancel', 'third']);
+
+const inputValues = reactive({});
+
+// Reset input values when dialog opens with new inputs
+watch(() => props.inputs, (newInputs) => {
+  Object.keys(inputValues).forEach(k => delete inputValues[k]);
+  for (const input of newInputs) {
+    inputValues[input.key] = input.value || '';
+  }
+}, { immediate: true });
 
 const dialogClass = computed(() => `dialog-${props.type}`);
 const confirmButtonClass = computed(() => {
   return props.type === 'danger' ? 'btn-danger' : 'btn-primary';
 });
 
-const handleConfirm = () => emit('confirm');
-const handleCancel = () => emit('cancel');
+const getInputData = () => ({ ...inputValues });
+
+const handleConfirm = () => emit('confirm', getInputData());
+const handleCancel = () => emit('cancel', getInputData());
+const handleThird = () => emit('third', getInputData());
+
+// Watch autoConfirm counter — when it increments, auto-trigger confirm
+watch(() => props.autoConfirm, (val) => {
+  if (val > 0 && props.isOpen) handleConfirm();
+});
 </script>
 
 <style scoped>
@@ -124,6 +159,41 @@ const handleCancel = () => emit('cancel');
   line-height: 1.5;
 }
 
+.confirm-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.confirm-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirm-input-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.confirm-input {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.confirm-input:focus {
+  border-color: var(--accent-primary);
+}
+
 .confirm-actions {
   display: flex;
   gap: 12px;
@@ -169,6 +239,16 @@ const handleCancel = () => emit('cancel');
 .btn-danger:hover {
   opacity: 0.9;
   transform: translateY(-1px);
+}
+
+.btn-danger-sm {
+  background: transparent;
+  color: var(--error, #ef4444);
+  border: 1px solid var(--error, #ef4444);
+}
+
+.btn-danger-sm:hover {
+  background: rgba(239, 68, 68, 0.15);
 }
 
 @keyframes fadeIn {

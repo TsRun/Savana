@@ -1,6 +1,6 @@
 import express from 'express';
 import db from '../models/database.js';
-import { getSummonerLevel, getMatchIds, calculateStats, getRankData, formatRank, getPuuidByRiotId } from '../utils/riotApi.js';
+import { getSummonerLevel, getMatchIds, calculateStats, getRankData, formatRank, getPuuidByRiotId, getRiotIdByPuuid } from '../utils/riotApi.js';
 
 const router = express.Router();
 
@@ -125,6 +125,23 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 /**
+ * PUT /api/smurfs/:id/credentials
+ */
+router.put('/:id/credentials', requireAuth, (req, res) => {
+  const userId = req.session.user_id;
+  const smurfId = parseInt(req.params.id);
+  const { username, password } = req.body;
+
+  const smurf = db.getSmurfById(smurfId);
+  if (!smurf || smurf.user_id !== userId) {
+    return res.status(404).json({ error: 'Smurf non trouvé' });
+  }
+
+  db.updateSmurfCredentials(smurfId, username || '', password || '');
+  res.json({ success: true });
+});
+
+/**
  * DELETE /api/smurfs/:id
  */
 router.delete('/:id', requireAuth, (req, res) => {
@@ -182,10 +199,11 @@ async function updateSingleSmurf(smurfId) {
   let currentPuuid = smurf.puuid;
 
   try {
-    // 1. Level + Tier
-    const [levelResult, rankData] = await Promise.all([
+    // 1. Level + Tier + Current Riot ID
+    const [levelResult, rankData, currentRiotId] = await Promise.all([
       getSummonerLevel(currentPuuid, gameName, tagLine),
-      getRankData(currentPuuid)
+      getRankData(currentPuuid),
+      getRiotIdByPuuid(currentPuuid)
     ]);
 
     if (levelResult.corrected && levelResult.puuid !== currentPuuid) {
@@ -213,6 +231,12 @@ async function updateSingleSmurf(smurfId) {
       flex_wins: flex.wins,
       flex_losses: flex.losses
     };
+
+    // Update Riot ID if changed
+    if (currentRiotId && currentRiotId !== smurf.pseudo) {
+      console.log(`   [UPDATE] Riot ID changed: ${smurf.pseudo} -> ${currentRiotId}`);
+      updateData.pseudo = currentRiotId;
+    }
 
     // Update Legacy Stats Columns (map soloq -> ranked for backward compat)
     const legacyQ = (queue === 'soloq' || queue === 'flex') ? 'ranked' : queue;

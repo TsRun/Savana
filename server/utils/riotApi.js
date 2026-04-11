@@ -66,6 +66,19 @@ const puuidCache = new Map();
 
 // === EXPORTED FUNCTIONS ===
 
+export async function getRiotIdByPuuid(puuid) {
+  try {
+    const url = `https://${ROUTING_VALUE}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${puuid}`;
+    const response = await safeRequest(url);
+    const { gameName, tagLine } = response.data || {};
+    if (gameName && tagLine) return `${gameName}#${tagLine}`;
+    return null;
+  } catch (err) {
+    console.error(`   [API ERROR] getRiotIdByPuuid failed: ${err.message}`);
+    return null;
+  }
+}
+
 export async function getPuuidByRiotId(gameName, tagLine) {
   const cacheKey = `${gameName}#${tagLine}`;
   if (puuidCache.has(cacheKey)) return puuidCache.get(cacheKey);
@@ -321,6 +334,7 @@ export function formatRank(rankData) {
 }
 
 export default {
+  getRiotIdByPuuid,
   getPuuidByRiotId,
   getSummonerLevel,
   getMatchIds,
