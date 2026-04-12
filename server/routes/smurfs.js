@@ -83,6 +83,7 @@ router.get('/', requireAuth, (req, res) => {
       last_updated: smurf.last_updated,
       id: smurf.id,
       hasToken: !!smurf.riot_tokens,
+      sort_order: smurf.sort_order,
       is_syncing: false
     };
   });
@@ -139,6 +140,25 @@ router.put('/:id/credentials', requireAuth, (req, res) => {
 
   db.updateSmurfCredentials(smurfId, username || '', password || '');
   res.json({ success: true });
+});
+
+/**
+ * PUT /api/smurfs/reorder
+ */
+router.put('/reorder', requireAuth, (req, res) => {
+  const userId = req.session.user_id;
+  const { order } = req.body;
+
+  if (!Array.isArray(order)) {
+    return res.status(400).json({ error: 'order must be an array of {id, sort_order}' });
+  }
+
+  try {
+    db.updateSmurfOrder(userId, order);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /**
@@ -200,11 +220,28 @@ async function updateSingleSmurf(smurfId) {
 
   try {
     // 1. Level + Tier + Current Riot ID
-    const [levelResult, rankData, currentRiotId] = await Promise.all([
+    let [levelResult, rankData, currentRiotId] = await Promise.all([
       getSummonerLevel(currentPuuid, gameName, tagLine),
       getRankData(currentPuuid),
       getRiotIdByPuuid(currentPuuid)
     ]);
+
+    // If PUUID lookup failed, try to re-resolve from stored Riot ID
+    if (!currentRiotId && gameName && tagLine) {
+      console.log(`   [FIX] PUUID lookup failed, re-resolving from ${gameName}#${tagLine}...`);
+      const newPuuid = await getPuuidByRiotId(gameName, tagLine);
+      if (newPuuid && newPuuid !== currentPuuid) {
+        console.log(`   [FIX] New PUUID found: ${newPuuid} (was ${currentPuuid})`);
+        currentPuuid = newPuuid;
+        db.updateSmurfPuuid(smurfId, currentPuuid);
+        // Re-fetch with corrected PUUID
+        [levelResult, rankData, currentRiotId] = await Promise.all([
+          getSummonerLevel(currentPuuid),
+          getRankData(currentPuuid),
+          getRiotIdByPuuid(currentPuuid)
+        ]);
+      }
+    }
 
     if (levelResult.corrected && levelResult.puuid !== currentPuuid) {
       currentPuuid = levelResult.puuid;
@@ -322,6 +359,75 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
 
   scheduler.enqueue(smurfId);
   res.status(202).json({ status: 'Refresh queued' });
+});
+
+/**
+ * PATCH /api/smurfs/:id/nickname
+ * Manually update the Riot ID (nickname#tag) and re-resolve PUUID
+ */
+router.patch('/:id/nickname', requireAuth, async (req, res) => {
+  const smurfId = parseInt(req.params.id);
+  const smurf = db.getSmurfById(smurfId);
+  if (!smurf || smurf.user_id !== req.session.user_id) {
+    return res.status(404).json({ error: 'Smurf non trouvé' });
+  }
+
+  const { riotId } = req.body;
+  if (!riotId || !riotId.includes('#')) {
+    return res.status(400).json({ error: 'Format invalide. Utilisez Pseudo#TAG' });
+  }
+
+  const [gameName, tagLine] = riotId.split('#');
+  try {
+    const newPuuid = await getPuuidByRiotId(gameName, tagLine);
+    if (!newPuuid) {
+      return res.status(404).json({ error: `Compte introuvable: ${riotId}` });
+    }
+
+    db.updateSmurfData(smurfId, { pseudo: riotId });
+    if (newPuuid !== smurf.puuid) {
+      db.updateSmurfPuuid(smurfId, newPuuid);
+    }
+
+    res.json({ success: true, pseudo: riotId, puuid: newPuuid });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/smurfs/sync-riot-id
+ * Takes a PUUID (from lockfile), resolves current Riot ID, updates matching smurf
+ */
+router.post('/sync-riot-id', requireAuth, async (req, res) => {
+  const { puuid } = req.body;
+  if (!puuid) return res.status(400).json({ error: 'puuid required' });
+
+  try {
+    const currentRiotId = await getRiotIdByPuuid(puuid);
+    if (!currentRiotId) {
+      return res.json({ success: false, error: 'Could not resolve Riot ID' });
+    }
+
+    // Find matching smurf by PUUID
+    const smurfs = db.getUserSmurfs(req.session.user_id);
+    const match = smurfs.find(s => s.puuid === puuid);
+
+    if (match && currentRiotId !== match.pseudo) {
+      console.log(`[SYNC] Riot ID updated: ${match.pseudo} -> ${currentRiotId}`);
+      db.updateSmurfData(match.id, { pseudo: currentRiotId });
+      return res.json({ success: true, oldPseudo: match.pseudo, newPseudo: currentRiotId, smurfId: match.id });
+    }
+
+    // Maybe PUUID changed — try to find by old Riot ID
+    if (!match) {
+      return res.json({ success: false, error: 'No matching account found for this PUUID' });
+    }
+
+    return res.json({ success: true, pseudo: currentRiotId, unchanged: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

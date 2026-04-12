@@ -97,17 +97,32 @@
         </header>
         <div v-if="error" class="error-banner">{{ error }}</div>
         <div class="accounts-grid">
-          <SmurfCard 
-            v-for="smurf in filteredSmurfs" 
+          <div
+            v-for="smurf in filteredSmurfs"
             :key="smurf.id || smurf.PUUID"
-            :smurf="smurf"
-            :displayRank="displayRank"
-            @copy="handleCopy"
-            @delete="deleteSmurf"
-            @save-session="handleSaveSession"
-            @load-session="handleLoadSession"
-            @update-credentials="handleUpdateCredentials"
-          />
+            class="drag-wrapper"
+            :class="{ 'drag-over': dragState.overId === (smurf.id || smurf.PUUID), 'drag-source': dragState.dragId === (smurf.id || smurf.PUUID) && dragState.dragging }"
+            draggable="true"
+            @dragstart="onDragStart($event, smurf)"
+            @dragover="onDragOver($event, smurf)"
+            @dragleave="onDragLeave($event, smurf)"
+            @drop="onDrop($event, smurf)"
+            @dragend="onDragEnd"
+          >
+            <SmurfCard
+              :smurf="smurf"
+              :displayRank="displayRank"
+              :flippedId="flippedCardId"
+              @copy="handleCopy"
+              @delete="deleteSmurf"
+              @save-session="handleSaveSession"
+              @load-session="handleLoadSession"
+              @update-credentials="handleUpdateCredentials"
+              @disconnect-session="handleDisconnectSession"
+              @flip="(id) => flippedCardId = id"
+              @flip-back="flippedCardId = null"
+            />
+          </div>
         </div>
         <div v-if="filteredSmurfs.length === 0 && !loading" class="empty-state">
           <div class="empty-icon">No Data</div>
@@ -143,6 +158,7 @@
       :thirdText="confirmDialog.thirdText"
       :inputs="confirmDialog.inputs"
       :autoConfirm="confirmDialog.autoConfirm"
+      :locked="confirmDialog.locked"
       :type="confirmDialog.type"
       @confirm="handleDialogConfirm"
       @cancel="handleDialogCancel"
@@ -182,6 +198,7 @@ const isAuthenticated = ref(false);
 const currentUser = ref(null);
 const showAddModal = ref(false);
 const showAddFriendModal = ref(false);
+const flippedCardId = ref(null);
 const toasts = ref([]);
 const currentView = ref('accounts');
 const showSmurfsInFriends = ref(false);
@@ -227,6 +244,7 @@ const confirmDialog = ref({
   thirdText: '',
   inputs: [],
   autoConfirm: 0,
+  locked: false,
   type: 'info',
   onConfirm: null,
   onCancel: null,
@@ -244,6 +262,7 @@ const showConfirm = (options) => {
       thirdText: options.thirdText || '',
       inputs: options.inputs || [],
       autoConfirm: 0,
+      locked: options.locked || false,
       type: options.type || 'info',
       onConfirm: (data) => resolve({ action: 'confirm', data }),
       onCancel: (data) => resolve({ action: 'cancel', data }),
@@ -285,16 +304,102 @@ import { useApi } from './composables/useApi';
 
 const { apiUrl, initApi } = useApi();
 
+// Drag and drop reordering
+const dragState = ref({ dragging: false, dragId: null, overId: null });
+
+const onDragStart = (e, smurf) => {
+  const smurfKey = smurf.id || smurf.PUUID;
+  if (flippedCardId.value === smurfKey) return e.preventDefault();
+  dragState.value.dragging = true;
+  dragState.value.dragId = smurf.id || smurf.PUUID;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', '');
+  e.target.closest('.card-wrapper').classList.add('dragging');
+};
+
+const onDragOver = (e, smurf) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const targetId = smurf.id || smurf.PUUID;
+  if (targetId !== dragState.value.dragId) {
+    dragState.value.overId = targetId;
+  }
+};
+
+const onDragLeave = (e, smurf) => {
+  const targetId = smurf.id || smurf.PUUID;
+  if (dragState.value.overId === targetId) {
+    dragState.value.overId = null;
+  }
+};
+
+const onDrop = async (e, targetSmurf) => {
+  e.preventDefault();
+  const dragId = dragState.value.dragId;
+  const targetId = targetSmurf.id || targetSmurf.PUUID;
+  if (!dragId || dragId === targetId) return resetDrag();
+
+  const list = [...filteredSmurfs.value];
+  const fromIdx = list.findIndex(s => (s.id || s.PUUID) === dragId);
+  const toIdx = list.findIndex(s => (s.id || s.PUUID) === targetId);
+  if (fromIdx === -1 || toIdx === -1) return resetDrag();
+
+  const [moved] = list.splice(fromIdx, 1);
+  list.splice(toIdx, 0, moved);
+
+  // Update sort_order in smurfs array
+  const order = list.map((s, i) => ({ id: s.id, sort_order: i }));
+  for (const o of order) {
+    const s = smurfs.value.find(x => x.id === o.id);
+    if (s) s.sort_order = o.sort_order;
+  }
+
+  resetDrag();
+
+  // Persist to backend
+  try {
+    await fetch(`${apiUrl.value}/smurfs/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ order })
+    });
+  } catch (e) {
+    console.error('Failed to save order:', e);
+  }
+};
+
+const onDragEnd = () => {
+  document.querySelectorAll('.card-wrapper.dragging').forEach(el => el.classList.remove('dragging'));
+  resetDrag();
+};
+
+const resetDrag = () => {
+  dragState.value = { dragging: false, dragId: null, overId: null };
+};
+
 const filteredSmurfs = computed(() => {
   let result = [...smurfs.value];
-  
+
   // Filter
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase();
     result = result.filter(s => s.Pseudo?.toLowerCase().includes(query) || s.UserName?.toLowerCase().includes(query));
   }
-  
-  // Sort
+
+  // If any smurf has a sort_order, use manual ordering (from DB)
+  const hasManualOrder = result.some(s => s.sort_order != null);
+  if (hasManualOrder && !searchQuery.value) {
+    result.sort((a, b) => {
+      if (a.sort_order != null && b.sort_order != null) return a.sort_order - b.sort_order;
+      if (a.sort_order != null) return -1;
+      if (b.sort_order != null) return 1;
+      return 0;
+    });
+    return result;
+  }
+
+  // Default: sort by rank
   const getTierValue = (tier) => {
     if (!tier) return 0;
     const tiers = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
@@ -310,24 +415,18 @@ const filteredSmurfs = computed(() => {
   const getScore = (smurf, type) => {
     if (type === 'level') return smurf.Level || 0;
     if (type === 'name') return smurf.Pseudo || smurf.UserName || '';
-    
+
     const data = type === 'flex' ? (smurf.Elo_Flex || {}) : (smurf.Elo_SoloQ || {});
-    if (!data.tier) return -1; // Unranked at bottom
-    
+    if (!data.tier) return -1;
+
     return getTierValue(data.tier) + getDivisionValue(data.rank) + (data.lp || 0);
   };
-
 
   result.sort((a, b) => {
     const valA = getScore(a, displayRank.value);
     const valB = getScore(b, displayRank.value);
-
-    // If same rank score, sort by level (higher first)
-    if (valA === valB) {
-      return (b.Level || 0) - (a.Level || 0);
-    }
-    
-    return valB - valA; // Descending
+    if (valA === valB) return (b.Level || 0) - (a.Level || 0);
+    return valB - valA;
   });
 
   return result;
@@ -625,6 +724,7 @@ const saveAllSessions = async () => {
           confirmText: 'Save',
           cancelText: 'Skip',
           thirdText: 'Cancel All',
+          locked: true,
           inputs: [
             { key: 'username', label: 'Username', placeholder: 'Riot username', value: smurf.UserName || '' },
             { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: smurf.Password || '' }
@@ -659,48 +759,21 @@ const saveAllSessions = async () => {
           skipped++;
           continue;
         }
-      } else {
-        // Auto-logged in via session — still show quick dialog for credential editing
-        const { action, data } = await showConfirm({
-          title: `${label}`,
-          message: 'Connecte automatiquement via session existante.',
-          confirmText: 'Save',
-          cancelText: 'Skip',
-          thirdText: 'Cancel All',
-          inputs: [
-            { key: 'username', label: 'Username', placeholder: 'Riot username', value: smurf.UserName || '' },
-            { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: smurf.Password || '' }
-          ],
-          type: 'info'
-        });
-
-        // Save credentials if changed
-        const newUser = (data?.username || '').trim();
-        const newPass = (data?.password || '').trim();
-        if (newUser !== (smurf.UserName || '') || newPass !== (smurf.Password || '')) {
-          try {
-            await fetch(`${apiUrl.value}/smurfs/${smurf.id}/credentials`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ username: newUser, password: newPass })
-            });
-            smurf.UserName = newUser;
-            smurf.Password = newPass;
-          } catch (e) { console.error('Credential save error:', e); }
-        }
-
-        if (action === 'third' || globalCancelled.value) {
-          smurf.is_syncing = false;
-          cancelled = true;
-          break;
-        }
-        if (action !== 'confirm') {
-          smurf.is_syncing = false;
-          skipped++;
-          continue;
-        }
       }
+      // Auto-logged in via session — save directly, no dialog needed
+
+      // Get current PUUID from Riot Client and sync Riot ID
+      try {
+        const loginInfo = await window.electronAPI.checkRiotLogin();
+        if (loginInfo.loggedIn && loginInfo.puuid) {
+          await fetch(`${apiUrl.value}/smurfs/sync-riot-id`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ puuid: loginInfo.puuid })
+          });
+        }
+      } catch (e) { console.error('Sync Riot ID error:', e); }
 
       // Save the session
       await new Promise(r => setTimeout(r, 1000));
@@ -719,6 +792,9 @@ const saveAllSessions = async () => {
   }
 
   // Restore the original session that was active before the flow
+  // Dismiss the status bar
+  window.electronAPI?.updateLaunchStatus?.({ status: 'idle' });
+
   if (originalSessionPuuid) {
     try {
       await window.electronAPI.restoreRiotSession();
@@ -764,10 +840,11 @@ const handleUpdateCredentials = async ({ id, username, password }) => {
       body: JSON.stringify({ username, password })
     });
     if (!res.ok) throw new Error('Failed to update');
+
     await fetchSmurfs();
-    showToast('Credentials updated', 'success');
+    showToast('Updated', 'success');
   } catch (e) {
-    showToast('Failed to update credentials', 'error');
+    showToast('Failed to update: ' + e.message, 'error');
   }
 };
 
@@ -806,9 +883,21 @@ const handleSaveSession = async (smurf) => {
     // If preload matches main usage, we pass object.
 
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
-    
-    await fetchSmurfs(); // Refresh state
-    
+
+    // Sync Riot ID from active session
+    try {
+      const loginInfo = await window.electronAPI.checkRiotLogin();
+      if (loginInfo.loggedIn && loginInfo.puuid) {
+        await fetch(`${apiUrl.value}/smurfs/sync-riot-id`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ puuid: loginInfo.puuid })
+        });
+      }
+    } catch (e) { /* ignore */ }
+
+    await fetchSmurfs();
     showToast('Session sauvegardée pour ' + (smurf.Pseudo || smurf.UserName), 'success');
   } catch (e) {
     showToast('Echec: ' + e.message, 'error');
@@ -831,21 +920,41 @@ const handleLoadSession = async (smurf) => {
 
   if (confirmed.action !== 'confirm') return;
 
-  showToast('Chargement de la session...', 'info');
+  const name = smurf.Pseudo?.split('#')[0] || smurf.UserName || '?';
+  showToast(`${name} — Fermeture de Riot, lancement de League...`, 'info');
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
-    
+
     const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
     if (!filename) throw new Error('Impossible de générer un nom de fichier pour ce compte');
 
-    const res = await window.electronAPI.loadSession(filename); // Object passed? Need to check preload implementation or assumption.
-    // Assuming preload is consistent with: saveSession: (filename) => ipcRenderer.invoke('save-session', { filename })
-    // If preload was simply args spreading, then I need to modify preload too or call with object here.
-    // I will check preload in next step to be sure, but for now assuming object passing here to be safe if preload spawns args.
-    
+    const res = await window.electronAPI.loadSession(filename);
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
-    
-    showToast('Session chargée ! Vous pouvez lancer Riot.', 'success');
+
+    showToast(`${name} — League is starting`, 'success');
+  } catch (e) {
+    showToast('Echec: ' + e.message, 'error');
+  }
+};
+
+const handleDisconnectSession = async (smurf) => {
+  const name = smurf.Pseudo?.split('#')[0] || smurf.UserName || '?';
+  const confirmed = await showConfirm({
+    title: 'Disconnect',
+    message: `Supprimer la session sauvegardée pour ${name} ?\nLe compte ne pourra plus se connecter automatiquement.`,
+    confirmText: 'Disconnect',
+    cancelText: 'Annuler',
+    type: 'warning'
+  });
+  if (confirmed.action !== 'confirm') return;
+
+  try {
+    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    if (!filename) throw new Error('Nom de fichier invalide');
+    const res = await window.electronAPI.deleteSession(filename);
+    if (!res.success) throw new Error(res.error || 'Erreur');
+    await fetchSmurfs();
+    showToast(`${name} — Session supprimée`, 'success');
   } catch (e) {
     showToast('Echec: ' + e.message, 'error');
   }
@@ -930,7 +1039,11 @@ onMounted(async () => {
 .search-input { width: 220px; padding: 8px 16px; font-size: 0.875rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 10px; outline: none; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 .search-input:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
 .error-banner { display: flex; align-items: center; gap: 16px; padding: 16px 32px; background: rgba(239, 68, 68, 0.1); border-bottom: 1px solid rgba(239, 68, 68, 0.3); color: var(--error); }
-.accounts-grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px; padding: 32px; overflow-y: auto; align-content: start; contain: layout style; will-change: scroll-position; }
+.accounts-grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, 380px); justify-content: center; gap: 24px; padding: 32px; overflow-y: auto; align-content: start; contain: layout style; will-change: scroll-position; }
+.drag-wrapper { position: relative; transition: transform 0.2s ease, opacity 0.2s ease; }
+.drag-wrapper.drag-source { opacity: 0.4; transform: scale(0.95); }
+.drag-wrapper.drag-over { transform: scale(1.02); }
+.drag-wrapper.drag-over::before { content: ''; position: absolute; inset: -4px; border: 2px dashed var(--accent-primary); border-radius: 18px; pointer-events: none; z-index: 10; }
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-muted); }
 .empty-icon { font-size: 4rem; opacity: 0.5; }
 .empty-state h3 { color: var(--text-secondary); font-size: 1.25rem; }

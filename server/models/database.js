@@ -190,6 +190,20 @@ export async function initDb() {
     console.error('[DB] Migration prefs ranked->soloq fail:', e.message);
   }
 
+  // Migration: Add sort_order column for drag-and-drop reordering
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(row => row[1]);
+      if (!columns.includes('sort_order')) {
+        db.run('ALTER TABLE smurfs ADD COLUMN sort_order INTEGER DEFAULT NULL');
+        console.log('[DB] Migration: colonne sort_order ajoutee');
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration sort_order:', err.message);
+  }
+
   saveDatabase();
   console.log('[DB] Base de donnees initialisee');
 }
@@ -271,7 +285,7 @@ export function addSmurf(userId, puuid, pseudo, username, password) {
  * Récupère tous les smurfs d'un utilisateur
  */
 export function getUserSmurfs(userId) {
-  const result = db.exec('SELECT * FROM smurfs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+  const result = db.exec('SELECT * FROM smurfs WHERE user_id = ? ORDER BY CASE WHEN sort_order IS NOT NULL THEN 0 ELSE 1 END, sort_order ASC, created_at DESC', [userId]);
 
   if (result.length === 0) return [];
 
@@ -562,6 +576,16 @@ export function resetAllSmurfData() {
 }
 
 /**
+ * Update sort_order for multiple smurfs (drag-and-drop reorder)
+ */
+export function updateSmurfOrder(userId, orderList) {
+  for (const { id, sort_order } of orderList) {
+    db.run('UPDATE smurfs SET sort_order = ? WHERE id = ? AND user_id = ?', [sort_order, id, userId]);
+  }
+  saveDatabase();
+}
+
+/**
  * Close the database connection
  */
 export function closeDb() {
@@ -585,6 +609,7 @@ export default {
   updateSmurfCredentials,
   updateSmurfPuuid,
   updateSmurfTokens,
+  updateSmurfOrder,
   deleteSmurf,
   getSmurfById,
   getUserPreferences,

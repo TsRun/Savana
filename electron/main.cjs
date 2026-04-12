@@ -330,6 +330,7 @@ function getSessionDir(filename) {
 ipcMain.handle('save-session', async (event, { filename }) => {
   try {
     if (!filename) throw new Error('Filename requis');
+    console.log(`[Save] Saving session for: ${filename}`);
 
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
@@ -349,8 +350,10 @@ ipcMain.handle('save-session', async (event, { filename }) => {
     const destPath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
 
     fs.copyFileSync(sourcePath, destPath);
+    console.log(`[Save] Session saved: ${sourcePath} -> ${destPath}`);
     return { success: true, message: 'Session sauvegardée' };
   } catch (error) {
+    console.error('[Save] Error:', error.message);
     return { success: false, error: error.message };
   }
 });
@@ -359,53 +362,54 @@ ipcMain.handle('update-launch-status', (event, data) => {
   if (mainWindow) mainWindow.webContents.send('launch-status', data);
 });
 
-ipcMain.handle('load-session', async (event, { filename, timeout = 60000, label = '', keepOverlay = false }) => {
-  const prefix = label ? `${label} — ` : '';
+ipcMain.handle('load-session', async (event, { filename }) => {
   const send = (message) => {
-    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: `${prefix}${message}` });
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message });
   };
 
   try {
     if (!filename) throw new Error('Filename requis');
-
-    send('Préparation...');
+    console.log(`[Load] Starting load-session for: ${filename}`);
 
     const sessionDir = getSessionDir(filename);
     const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
 
     if (!fs.existsSync(sourcePath)) throw new Error('Aucune session sauvegardée pour ce compte');
+    console.log(`[Load] Session file found: ${sourcePath}`);
 
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
 
     send('Fermeture de Riot...');
+    console.log('[Load] Killing Riot/League processes...');
     await killRiotClient();
+    console.log('[Load] Processes killed, waiting before inject...');
     await sleep(500);
 
     let restored = false;
     for (const p of possiblePaths) {
       const dataDir = p.data;
       if (fs.existsSync(dataDir)) {
-        const files = fs.readdirSync(dataDir);
-        for (const file of files) {
-          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
-        }
-        send('Injection session...');
-        fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        const yamlDest = path.join(dataDir, 'RiotGamesPrivateSettings.yaml');
+        try { fs.rmSync(yamlDest, { force: true }); } catch (e) { }
+        fs.copyFileSync(sourcePath, yamlDest);
+        console.log(`[Load] Session injected: ${yamlDest}`);
         restored = true;
       }
     }
 
-    if (!restored) throw new Error('Dossier Data Riot introuvable pour la restauration');
+    if (!restored) throw new Error('Dossier Data Riot introuvable');
 
-    send('Lancement...');
-    try { await launchLeague(); } catch (launchErr) { }
+    send('Lancement de League...');
+    console.log('[Load] Launching League...');
+    await launchLeague();
+    console.log('[Load] League launch command sent');
 
-    // Don't block — dismiss overlay and let the game start in the background
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: true };
 
   } catch (error) {
+    console.error('[Load] Error:', error.message);
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: false, error: error.message };
   }
@@ -413,17 +417,12 @@ ipcMain.handle('load-session', async (event, { filename, timeout = 60000, label 
 
 async function countRiotClientUi() {
   try {
-    // Use PowerShell for reliable detection — tasklist has encoding issues on non-English Windows
-    const { stdout } = await execAsync(
-      'powershell -NoProfile -Command "(Get-Process -Name \'Riot Client\' -ErrorAction SilentlyContinue).Count"'
-    );
-    const count = parseInt(stdout.trim(), 10);
+    const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq Riot Client.exe" /NH');
+    const count = (stdout.match(/Riot Client/gi) || []).length;
     if (count > 0) return count;
     // Fallback: check old process name
-    const { stdout: stdout2 } = await execAsync(
-      'powershell -NoProfile -Command "(Get-Process -Name \'RiotClientUxRender\' -ErrorAction SilentlyContinue).Count"'
-    );
-    return parseInt(stdout2.trim(), 10) || 0;
+    const { stdout: stdout2 } = await execAsync('tasklist /FI "IMAGENAME eq RiotClientUxRender.exe" /NH');
+    return (stdout2.match(/RiotClientUxRender/gi) || []).length;
   } catch {
     return 0;
   }
@@ -438,15 +437,20 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
 
   try {
     if (!filename) throw new Error('Filename requis');
+    console.log(`[RiotOnly] Loading session: ${filename}`);
 
     send('Fermeture de Riot...');
+    console.log('[RiotOnly] Killing processes...');
     await killRiotClient();
     await sleep(500);
 
     const sessionDir = getSessionDir(filename);
     const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
 
-    if (!fs.existsSync(sourcePath)) return { success: false, error: 'no-session' };
+    if (!fs.existsSync(sourcePath)) {
+      console.log('[RiotOnly] No session file found');
+      return { success: false, error: 'no-session' };
+    }
 
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
@@ -455,11 +459,10 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
     for (const p of possiblePaths) {
       const dataDir = p.data;
       if (fs.existsSync(dataDir)) {
-        const files = fs.readdirSync(dataDir);
-        for (const file of files) {
-          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
-        }
-        fs.copyFileSync(sourcePath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        const yamlDest = path.join(dataDir, 'RiotGamesPrivateSettings.yaml');
+        try { fs.rmSync(yamlDest, { force: true }); } catch (e) { }
+        fs.copyFileSync(sourcePath, yamlDest);
+        console.log(`[RiotOnly] Session injected: ${yamlDest}`);
         restored = true;
       }
     }
@@ -467,6 +470,7 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
     if (!restored) throw new Error('Dossier Data Riot introuvable');
 
     send('Lancement Riot Client...');
+    console.log('[RiotOnly] Launching Riot Client...');
     await launchRiotClientOnly();
 
     // Wait for Riot Client UI to appear
@@ -474,16 +478,27 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
     const startTime = Date.now();
     let clientStarted = false;
     while (Date.now() - startTime < timeout) {
-      if (abortFlag) return { success: false, error: 'aborted' };
+      if (abortFlag) {
+        console.log('[RiotOnly] Aborted');
+        return { success: false, error: 'aborted' };
+      }
       const count = await countRiotClientUi();
-      if (count >= 1) { clientStarted = true; break; }
+      if (count >= 1) {
+        console.log(`[RiotOnly] Riot Client detected (count=${count})`);
+        clientStarted = true;
+        break;
+      }
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       send(`Attente Riot Client... ${elapsed}s / ${timeoutSec}s`);
       await sleep(1000);
     }
+    if (!clientStarted) console.log('[RiotOnly] Timeout — Riot Client not detected');
 
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: true, clientStarted };
   } catch (error) {
+    console.error('[RiotOnly] Error:', error.message);
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
     return { success: false, error: error.message };
   }
 });
@@ -491,45 +506,47 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
 // Launch just the Riot Client (no session injection, for manual login)
 ipcMain.handle('launch-riot-only', async () => {
   try {
+    console.log('[LaunchClean] Killing processes...');
     await killRiotClient();
     await sleep(1500);
 
-    // Clear existing session so user gets a fresh login screen
+    // Delete session YAML so user gets a fresh login screen
     const possiblePaths = getAllPossibleRiotPaths();
     for (const p of possiblePaths) {
-      const dataDir = p.data;
-      if (fs.existsSync(dataDir)) {
-        const files = fs.readdirSync(dataDir);
-        for (const file of files) {
-          try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
-        }
-      }
+      const yamlPath = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      try { fs.rmSync(yamlPath, { force: true }); } catch (e) { }
     }
+    console.log('[LaunchClean] Session YAML deleted, launching Riot Client...');
 
     await launchRiotClientOnly();
     return { success: true };
   } catch (error) {
+    console.error('[LaunchClean] Error:', error.message);
     return { success: false, error: error.message };
   }
 });
 
-// Wait for Riot Client to be connected (RiotClientUxRender running)
+// Wait for Riot Client to be connected
 ipcMain.handle('wait-riot-client', async (event, { timeout = 60000, label = '' }) => {
   const prefix = label ? `${label} — ` : '';
   const send = (message) => {
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'loading', message: `${prefix}${message}` });
   };
+  const idle = () => {
+    if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
+  };
 
   const timeoutSec = Math.floor(timeout / 1000);
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
-    if (abortFlag) return { connected: false };
+    if (abortFlag) { idle(); return { connected: false }; }
     const count = await countRiotClientUi();
-    if (count >= 1) return { connected: true };
+    if (count >= 1) { idle(); return { connected: true }; }
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     send(`Attente connexion... ${elapsed}s / ${timeoutSec}s`);
     await sleep(1000);
   }
+  idle();
   return { connected: false };
 });
 

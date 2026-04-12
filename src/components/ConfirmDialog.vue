@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="isOpen" class="confirm-overlay" @click.self="handleCancel">
+    <div v-if="isOpen" class="confirm-overlay" @click.self="!locked && handleCancel()">
       <div class="confirm-dialog" :class="dialogClass">
         <div class="confirm-icon" v-if="type">
           <svg v-if="type === 'danger'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -24,12 +24,20 @@
         <div v-if="inputs.length" class="confirm-inputs">
           <div v-for="input in inputs" :key="input.key" class="confirm-input-group">
             <label class="confirm-input-label">{{ input.label }}</label>
-            <input
-              :type="input.type || 'text'"
-              :placeholder="input.placeholder || ''"
-              v-model="inputValues[input.key]"
-              class="confirm-input"
-            />
+            <div class="confirm-input-row">
+              <input
+                :type="input.type || 'text'"
+                :placeholder="input.placeholder || ''"
+                v-model="inputValues[input.key]"
+                class="confirm-input"
+              />
+              <button v-if="inputValues[input.key]" class="confirm-copy-btn" @click="copyValue(inputValues[input.key])" title="Copy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         <div class="confirm-actions">
@@ -60,6 +68,7 @@ const props = defineProps({
   thirdText: { type: String, default: '' },
   inputs: { type: Array, default: () => [] },
   autoConfirm: { type: Number, default: 0 },
+  locked: { type: Boolean, default: false },
   type: { type: String, default: 'info' } // 'info', 'warning', 'danger'
 });
 
@@ -81,6 +90,14 @@ const confirmButtonClass = computed(() => {
 });
 
 const getInputData = () => ({ ...inputValues });
+
+const copyValue = (text) => {
+  if (window.electronAPI?.writeToClipboard) {
+    window.electronAPI.writeToClipboard(text);
+  } else {
+    navigator.clipboard.writeText(text);
+  }
+};
 
 const handleConfirm = () => emit('confirm', getInputData());
 const handleCancel = () => emit('cancel', getInputData());
@@ -179,7 +196,14 @@ watch(() => props.autoConfirm, (val) => {
   color: var(--text-secondary);
 }
 
+.confirm-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .confirm-input {
+  flex: 1;
   padding: 8px 12px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -188,9 +212,36 @@ watch(() => props.autoConfirm, (val) => {
   font-size: 0.9rem;
   outline: none;
   transition: border-color 0.15s ease;
+  min-width: 0;
 }
 
 .confirm-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.confirm-copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.confirm-copy-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.confirm-copy-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-primary);
   border-color: var(--accent-primary);
 }
 

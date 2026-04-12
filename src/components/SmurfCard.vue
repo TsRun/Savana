@@ -149,17 +149,12 @@
     </div>
 
     <!-- ============ BACK ============ -->
-    <div class="smurf-card card card-back">
-      <div class="back-header">
+    <div class="smurf-card card card-back" @click.self="flipBack">
+      <div class="back-header" @click="flipBack">
         <div class="back-title">
           <span class="back-name">{{ getPseudoName }}</span>
           <span class="back-tag">{{ getTag }}</span>
         </div>
-        <button class="back-close" @click="flipBack" title="Back">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
       </div>
 
       <div class="back-fields">
@@ -206,7 +201,7 @@
       </div>
 
       <div class="back-actions">
-        <button class="btn-back-cancel" @click="flipBack">Cancel</button>
+        <button v-if="smurf.hasSession" class="btn-back-disconnect" @click="$emit('disconnect-session', smurf)">Delete Session</button>
         <button class="btn-back-save" @click="saveAndFlip" :disabled="editSaving">
           {{ editSaving ? 'Saving...' : 'Save' }}
         </button>
@@ -226,27 +221,32 @@ const props = defineProps({
   displayRank: {
     type: String,
     default: 'soloq'
+  },
+  flippedId: {
+    type: [String, Number],
+    default: null
   }
 });
 
-const emit = defineEmits(['copy', 'delete', 'save-session', 'load-session', 'update-credentials']);
+const emit = defineEmits(['copy', 'delete', 'save-session', 'load-session', 'update-credentials', 'disconnect-session', 'flip', 'flip-back']);
 
 const isHovered = ref(false);
-const isFlipped = ref(false);
 const showPassword = ref(false);
 const editSaving = ref(false);
 const editForm = ref({ username: '', password: '', notes: '' });
+
+const isFlipped = computed(() => props.flippedId === (props.smurf.id || props.smurf.PUUID));
 
 const flip = () => {
   editForm.value.username = props.smurf.UserName || '';
   editForm.value.password = props.smurf.Password || '';
   editForm.value.notes = props.smurf.Notes || '';
   showPassword.value = false;
-  isFlipped.value = true;
+  emit('flip', props.smurf.id || props.smurf.PUUID);
 };
 
 const flipBack = () => {
-  isFlipped.value = false;
+  emit('flip-back');
 };
 
 const saveAndFlip = () => {
@@ -258,7 +258,7 @@ const saveAndFlip = () => {
     notes: editForm.value.notes.trim()
   });
   editSaving.value = false;
-  isFlipped.value = false;
+  emit('flip-back');
 };
 
 // Computed properties
@@ -408,7 +408,7 @@ const rankIconStyle = computed(() => {
 /* ========== FLIP CONTAINER ========== */
 .card-wrapper {
   position: relative;
-  perspective: 1200px;
+  perspective: 1000px;
   min-height: 400px;
 }
 
@@ -418,7 +418,7 @@ const rankIconStyle = computed(() => {
   -webkit-backface-visibility: hidden;
   position: absolute;
   inset: 0;
-  transition: transform 0.45s cubic-bezier(0.4, 0.0, 0.2, 1);
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .card-front {
@@ -838,8 +838,8 @@ const rankIconStyle = computed(() => {
 
 .back-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  cursor: pointer;
 }
 
 .back-title {
@@ -859,33 +859,15 @@ const rankIconStyle = computed(() => {
   color: var(--text-muted);
 }
 
-.back-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.back-close svg { width: 14px; height: 14px; }
-
-.back-close:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #ef4444;
-}
-
 .back-fields {
   display: flex;
   flex-direction: column;
   gap: 12px;
   flex: 1;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .field-group {
@@ -983,18 +965,20 @@ const rankIconStyle = computed(() => {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.btn-back-cancel {
-  padding: 8px 18px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
+.btn-back-disconnect {
+  padding: 8px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: #ef4444;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   transition: all 0.15s;
+  margin-right: auto;
 }
 
-.btn-back-cancel:hover { background: var(--bg-primary); }
+.btn-back-disconnect:hover { background: rgba(239, 68, 68, 0.25); border-color: #ef4444; }
+
 
 .btn-back-save {
   padding: 8px 24px;
