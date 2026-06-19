@@ -63,6 +63,28 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // === Durcissement navigation ===
+  // Bloquer toute popup/nouvelle fenêtre ; ouvrir les liens externes dans le
+  // navigateur de l'utilisateur plutôt que dans une BrowserWindow Electron.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      try { require('electron').shell.openExternal(url); } catch (e) { }
+    }
+    return { action: 'deny' };
+  });
+
+  // Empêcher la navigation du renderer vers une origine non locale
+  // (une XSS ne pourra pas rediriger l'app vers un site arbitraire).
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url);
+    if (!isLocal) {
+      event.preventDefault();
+      if (/^https?:\/\//i.test(url)) {
+        try { require('electron').shell.openExternal(url); } catch (e) { }
+      }
+    }
+  });
+
   // Démarrer le serveur backend
   if (!process.env.SKIP_BACKEND_SERVER) {
     if (!serverProcess) startBackendServer();

@@ -21,17 +21,22 @@ const app = express();
 // Middleware
 app.use(express.json());
 
-// CORS - permettre les cookies
+// CORS - restreint aux origines locales (le frontend est servi en same-origin).
+// On évite `origin: true` qui reflète n'importe quelle origine et autorise les
+// requêtes credentialed depuis un site malveillant (CSRF / vol de tokens).
+const ALLOWED_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 app.use(cors({
-  origin: true, // Reflète l'origine de la requête (permet file:// et autres)
+  origin: (origin, cb) => {
+    // Requêtes same-origin / non-navigateur (pas d'en-tête Origin) → autorisées
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGIN_REGEX.test(origin)) return cb(null, true);
+    return cb(new Error('Origin non autorisée par CORS'));
+  },
   credentials: true
 }));
-// Session Debugging Middleware
+// Request logging (sans données sensibles : pas de cookie/sessionID/userId)
 app.use((req, res, next) => {
   console.log(`[REQUEST] ${req.method} ${req.url}`);
-  console.log('  - Cookie:', req.headers.cookie ? 'Present' : 'Missing');
-  console.log('  - SessionID:', req.sessionID);
-  console.log('  - User:', req.session ? req.session.userId : 'No Session');
   next();
 });
 
@@ -50,8 +55,8 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    httpOnly: false,
-    secure: false,
+    httpOnly: true,   // empêche l'accès au cookie de session depuis le JS (anti-XSS)
+    secure: false,    // l'app tourne sur http://localhost (pas de TLS local)
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   }

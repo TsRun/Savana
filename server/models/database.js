@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import { encrypt, decrypt, isEncrypted } from '../utils/crypto.js';
 
 let db = null;
 let SQL = null;
@@ -204,15 +205,73 @@ export async function initDb() {
     console.error('[DB] Erreur migration sort_order:', err.message);
   }
 
+  // Migration: chiffrer les secrets existants stockés en clair (username, password, riot_tokens)
+  try {
+    const res = db.exec('SELECT id, username, password, riot_tokens FROM smurfs');
+    if (res.length > 0) {
+      let migrated = 0;
+      for (const row of res[0].values) {
+        const [id, username, password, tokens] = row;
+        const needs = [username, password, tokens].some(
+          v => v !== null && v !== undefined && String(v) !== '' && !isEncrypted(v)
+        );
+        if (needs) {
+          db.run(
+            'UPDATE smurfs SET username = ?, password = ?, riot_tokens = ? WHERE id = ?',
+            [encrypt(username), encrypt(password), encrypt(tokens), id]
+          );
+          migrated++;
+        }
+      }
+      if (migrated > 0) console.log(`[DB] Migration chiffrement: ${migrated} smurf(s) chiffré(s)`);
+    }
+  } catch (err) {
+    console.error('[DB] Migration chiffrement échouée:', err.message);
+  }
+
   saveDatabase();
   console.log('[DB] Base de donnees initialisee');
 }
 
 /**
- * Hash un mot de passe avec SHA256
+ * Hash un mot de passe avec scrypt + sel aléatoire.
+ * Format stocké: "scrypt$<saltHex>$<hashHex>"
  */
 function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt$${salt}$${derived}`;
+}
+
+/**
+ * Vérifie un mot de passe contre un hash stocké.
+ * Supporte le nouveau format scrypt ET l'ancien SHA-256 nu (pour migration).
+ * Comparaison en temps constant.
+ */
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  stored = String(stored);
+
+  if (stored.startsWith('scrypt$')) {
+    const [, salt, hash] = stored.split('$');
+    if (!salt || !hash) return false;
+    const derived = crypto.scryptSync(String(password), salt, 64);
+    const hashBuf = Buffer.from(hash, 'hex');
+    if (hashBuf.length !== derived.length) return false;
+    return crypto.timingSafeEqual(hashBuf, derived);
+  }
+
+  // Legacy: SHA-256 nu (hex 64 chars)
+  const legacy = crypto.createHash('sha256').update(String(password)).digest('hex');
+  if (legacy.length !== stored.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(legacy), Buffer.from(stored));
+}
+
+/**
+ * Indique si un hash stocké utilise l'ancien schéma (à migrer).
+ */
+function isLegacyHash(stored) {
+  return !!stored && !String(stored).startsWith('scrypt$');
 }
 
 
@@ -244,13 +303,30 @@ export function createUser(username, password) {
 
 
 export function authenticateUser(username, password) {
-  const passwordHash = hashPassword(password);
-  const result = db.exec('SELECT id FROM users WHERE username = ? AND password_hash = ?',
-    [username, passwordHash]);
-  if (result.length > 0 && result[0].values.length > 0) {
-    return result[0].values[0][0];
+  const result = db.exec('SELECT id, password_hash FROM users WHERE username = ?', [username]);
+  if (result.length === 0 || result[0].values.length === 0) {
+    return null;
   }
-  return null;
+
+  const userId = result[0].values[0][0];
+  const storedHash = result[0].values[0][1];
+
+  if (!verifyPassword(password, storedHash)) {
+    return null;
+  }
+
+  // Migration transparente: ré-hacher en scrypt si ancien format
+  if (isLegacyHash(storedHash)) {
+    try {
+      db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(password), userId]);
+      saveDatabase();
+      console.log(`[DB] Hash mot de passe migré vers scrypt (user_id=${userId})`);
+    } catch (e) {
+      console.error('[DB] Échec migration hash:', e.message);
+    }
+  }
+
+  return userId;
 }
 
 /**
@@ -274,7 +350,7 @@ export function addSmurf(userId, puuid, pseudo, username, password) {
   db.run(`
     INSERT INTO smurfs (user_id, puuid, pseudo, username, password)
     VALUES (?, ?, ?, ?, ?)
-  `, [userId, puuid, pseudo, username, password]);
+  `, [userId, puuid, pseudo, encrypt(username), encrypt(password)]);
 
   const result = db.exec('SELECT last_insert_rowid() as id');
   saveDatabase();
@@ -298,9 +374,12 @@ export function getUserSmurfs(userId) {
     return smurf;
   });
 
-  // Parser tous les JSON stats
+  // Parser tous les JSON stats + déchiffrer les secrets
   return smurfs.map(smurf => ({
     ...smurf,
+    username: decrypt(smurf.username),
+    password: decrypt(smurf.password),
+    riot_tokens: decrypt(smurf.riot_tokens),
     stats_json: smurf.stats_json ? JSON.parse(smurf.stats_json) : {},
     stats_30_ranked: smurf.stats_30_ranked ? JSON.parse(smurf.stats_30_ranked) : null,
     stats_30_all: smurf.stats_30_all ? JSON.parse(smurf.stats_30_all) : null,
@@ -425,6 +504,11 @@ export function getSmurfById(smurfId) {
     smurf[col] = row[i];
   });
 
+  // Déchiffrer les secrets
+  if ('username' in smurf) smurf.username = decrypt(smurf.username);
+  if ('password' in smurf) smurf.password = decrypt(smurf.password);
+  if ('riot_tokens' in smurf) smurf.riot_tokens = decrypt(smurf.riot_tokens);
+
   if (smurf.stats) {
     smurf.stats = JSON.parse(smurf.stats);
   }
@@ -435,7 +519,7 @@ export function getSmurfById(smurfId) {
  * Met à jour les identifiants d'un smurf
  */
 export function updateSmurfCredentials(smurfId, username, password) {
-  db.run('UPDATE smurfs SET username = ?, password = ? WHERE id = ?', [username, password, smurfId]);
+  db.run('UPDATE smurfs SET username = ?, password = ? WHERE id = ?', [encrypt(username), encrypt(password), smurfId]);
   const changes = db.getRowsModified();
   saveDatabase();
   return changes > 0;
@@ -445,7 +529,7 @@ export function updateSmurfCredentials(smurfId, username, password) {
  * Met à jour les tokens Riot d'un smurf
  */
 export function updateSmurfTokens(smurfId, tokens) {
-  db.run('UPDATE smurfs SET riot_tokens = ? WHERE id = ?', [JSON.stringify(tokens), smurfId]);
+  db.run('UPDATE smurfs SET riot_tokens = ? WHERE id = ?', [encrypt(JSON.stringify(tokens)), smurfId]);
   const changes = db.getRowsModified();
   saveDatabase();
   return changes > 0;

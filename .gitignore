@@ -13,6 +13,8 @@ storage/
 
 # Environnement - SENSIBLE
 .env
+.session_secret
+.savana_key
 .env.local
 .env.*.local
 .env.production
@@ -62,3 +64,6 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.mcp.json
+.agentsroom/handoff-transcript-*.txt
+.agentsroom/handoff-summary-*.md

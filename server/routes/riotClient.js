@@ -7,6 +7,19 @@ import { exec } from 'child_process';
 const router = express.Router();
 
 /**
+ * Middleware: exige une session authentifiée.
+ * Ces routes lisent/écrivent les tokens de session Riot (très sensibles),
+ * elles doivent toutes être protégées.
+ */
+function requireAuth(req, res, next) {
+  if (!req.session?.user_id) {
+    return res.status(401).json({ error: 'Non authentifié' });
+  }
+  next();
+}
+router.use(requireAuth);
+
+/**
  * Trouve le chemin du Riot Client selon l'OS
  */
 function getRiotClientPath() {
