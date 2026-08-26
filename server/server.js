@@ -11,6 +11,7 @@ import tokensRoutes from './routes/tokens.js';
 import riotClientRoutes from './routes/riotClient.js';
 import friendsRoutes from './routes/friends.js';
 import dataRoutes from './routes/data.js';
+import settingsRoutes from './routes/settings.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -85,6 +86,7 @@ app.use('/api/tokens', tokensRoutes);
 app.use('/api/riot-client', riotClientRoutes);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/data', dataRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Servir le Frontend en Production (Unified Server)
 

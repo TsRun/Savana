@@ -53,9 +53,42 @@ function resolveSessionSecret() {
   }
 }
 
+/**
+ * Clé API Riot — plus jamais embarquée dans l'installeur.
+ * Priorité : variable d'environnement (dev/.env) > fichier local userData
+ * (saisie via l'UI au premier lancement).
+ */
+const riotKeyPath = path.join(
+  process.env.USER_DATA_PATH || path.join(_dirname, '..'),
+  '.riot_api_key'
+);
+
+let riotKeyCache = undefined; // undefined = pas encore lu
+
+export function getRiotApiKey() {
+  if (process.env.RIOT_API_KEY) return process.env.RIOT_API_KEY;
+  if (riotKeyCache !== undefined) return riotKeyCache;
+  try {
+    riotKeyCache = fs.existsSync(riotKeyPath)
+      ? fs.readFileSync(riotKeyPath, 'utf8').trim() || null
+      : null;
+  } catch (e) {
+    riotKeyCache = null;
+  }
+  return riotKeyCache;
+}
+
+export function setRiotApiKey(key) {
+  const trimmed = String(key || '').trim();
+  if (!trimmed) throw new Error('Clé vide');
+  fs.writeFileSync(riotKeyPath, trimmed, { mode: 0o600 });
+  riotKeyCache = trimmed;
+  return true;
+}
+
 export const config = {
   port: process.env.PORT || 3000,
-  riotApiKey: process.env.RIOT_API_KEY,
+  get riotApiKey() { return getRiotApiKey(); },
   regionHost: 'euw1.api.riotgames.com',
   routingValue: 'europe',
   sessionSecret: resolveSessionSecret(),

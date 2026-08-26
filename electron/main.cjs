@@ -707,19 +707,31 @@ app.whenReady().then(() => {
   createWindow();
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify().catch(err => {
-      console.log('[AutoUpdater] Pas de mise à jour disponible:', err.message);
+    autoUpdater.on('update-available', (info) => {
+      if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading', version: info?.version });
     });
-    autoUpdater.on('update-available', () => {
-      if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading' });
+    autoUpdater.on('download-progress', (p) => {
+      if (mainWindow) mainWindow.webContents.send('update-status', { status: 'downloading', percent: Math.round(p?.percent || 0) });
     });
-    autoUpdater.on('update-downloaded', () => {
-      if (mainWindow) mainWindow.webContents.send('update-status', { status: 'ready' });
+    autoUpdater.on('update-downloaded', (info) => {
+      if (mainWindow) mainWindow.webContents.send('update-status', { status: 'ready', version: info?.version });
     });
     autoUpdater.on('error', (err) => {
       console.log('[AutoUpdater] Error:', err.message);
     });
+    autoUpdater.checkForUpdatesAndNotify().catch(err => {
+      console.log('[AutoUpdater] Pas de mise à jour disponible:', err.message);
+    });
+    // Re-check toutes les 4h tant que l'app tourne
+    setInterval(() => {
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    }, 4 * 60 * 60 * 1000);
   }
+});
+
+// Installe la mise à jour téléchargée (quitte et relance l'app)
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
 });
 
 app.on('window-all-closed', () => {

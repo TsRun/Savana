@@ -15,6 +15,7 @@ storage/
 .env
 .session_secret
 .savana_key
+.riot_api_key
 .env.local
 .env.*.local
 .env.production

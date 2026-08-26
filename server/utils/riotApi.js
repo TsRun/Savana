@@ -3,9 +3,11 @@ import { config } from '../config.js';
 
 const REGION_HOST = config.regionHost;
 const ROUTING_VALUE = config.routingValue;
-const API_KEY = config.riotApiKey;
 
-const headers = { 'X-Riot-Token': API_KEY };
+// La clé peut être saisie/modifiée à chaud via l'UI : lecture dynamique
+function getHeaders() {
+  return { 'X-Riot-Token': config.riotApiKey || '' };
+}
 
 const TIERS_ORDER = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
 
@@ -57,7 +59,7 @@ const limiter = new RateLimiter(1250);
 
 async function safeRequest(url, options = {}) {
   // Enqueue the request
-  return limiter.add(() => axios.get(url, { ...options, headers }));
+  return limiter.add(() => axios.get(url, { ...options, headers: getHeaders() }));
 }
 
 // Cache pour les PUUIDs

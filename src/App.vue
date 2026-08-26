@@ -66,6 +66,12 @@
             </button>
             <input ref="importFileInput" type="file" accept=".json,application/json" style="display: none;" @change="handleImportFile" />
           </div>
+          <button @click="editRiotKey" class="data-btn data-btn-full" title="Configurer la clé API Riot (developer.riotgames.com)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+            <span>API Key</span>
+          </button>
         </div>
       </aside>
 
@@ -88,6 +94,9 @@
                   <option value="all">All</option>
               </select>
             </div>
+            <button v-if="updateInfo?.status === 'ready'" @click="installUpdate" class="btn btn-primary" title="Redémarrer l'application pour installer la mise à jour">
+              Update{{ updateInfo.version ? ' v' + updateInfo.version : '' }}
+            </button>
             <button @click="refreshElo(true)" :disabled="loading" class="btn btn-secondary" title="Actualiser les élos et stats de tous les comptes (Ctrl+R)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px;">
                 <polyline points="23 4 23 10 17 10"/>
@@ -495,11 +504,97 @@ const checkAuth = async () => {
       isAuthenticated.value = true;
       await fetchSmurfs();
       await fetchFriends();
+      // Clé API Riot requise avant tout refresh (plus embarquée dans l'installeur)
+      await checkRiotKey();
       // Start auto-refresh and trigger initial stats refresh
       startAutoRefresh();
       refreshElo();
     }
   } catch (e) { console.error('Auth check failed:', e); }
+};
+
+// === CLÉ API RIOT ===
+
+const checkRiotKey = async () => {
+  try {
+    const res = await fetch(apiUrl.value + '/settings/riot-key', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.configured) await promptRiotKey();
+  } catch (e) { console.error('Riot key check failed:', e); }
+};
+
+const promptRiotKey = async (currentMasked = null) => {
+  const confirmed = await showConfirm({
+    title: 'Clé API Riot',
+    message: currentMasked
+      ? `Clé actuelle : ${currentMasked}\nCollez une nouvelle clé pour la remplacer.`
+      : 'Savana a besoin d\'une clé API Riot pour récupérer les rangs et stats.\nObtenez-en une sur developer.riotgames.com puis collez-la ici.',
+    confirmText: 'Enregistrer',
+    cancelText: 'Plus tard',
+    type: 'info',
+    inputs: [{ key: 'riotKey', label: 'Riot API Key', placeholder: 'RGAPI-xxxxxxxx-xxxx-...' }]
+  });
+
+  if (confirmed.action !== 'confirm') {
+    if (!currentMasked) showToast('Sans clé API, les rangs et stats ne seront pas actualisés', 'error');
+    return false;
+  }
+
+  const key = (confirmed.data?.riotKey || '').trim();
+  if (!key) return promptRiotKey(currentMasked);
+
+  try {
+    const res = await fetch(apiUrl.value + '/settings/riot-key', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ key })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Clé refusée', 'error');
+      return promptRiotKey(currentMasked);
+    }
+    showToast('Clé API enregistrée', 'success');
+    return true;
+  } catch (e) {
+    showToast('Erreur réseau : ' + e.message, 'error');
+    return false;
+  }
+};
+
+const editRiotKey = async () => {
+  let masked = null;
+  try {
+    const res = await fetch(apiUrl.value + '/settings/riot-key', { credentials: 'include' });
+    if (res.ok) masked = (await res.json()).masked;
+  } catch (e) { }
+  const saved = await promptRiotKey(masked);
+  if (saved) refreshElo(true);
+};
+
+// === MISE À JOUR AUTOMATIQUE ===
+
+const updateInfo = ref(null);
+
+const initUpdateListener = () => {
+  if (!window.electronAPI?.onUpdateStatus) return;
+  window.electronAPI.onUpdateStatus((data) => {
+    const wasReady = updateInfo.value?.status === 'ready';
+    const wasDownloading = !!updateInfo.value;
+    updateInfo.value = { ...updateInfo.value, ...data };
+    if (data.status === 'downloading' && !wasDownloading) {
+      showToast(`Mise à jour ${data.version ? 'v' + data.version + ' ' : ''}en téléchargement...`, 'info');
+    }
+    if (data.status === 'ready' && !wasReady) {
+      showToast('Mise à jour prête — cliquez sur Update pour redémarrer', 'success');
+    }
+  });
+};
+
+const installUpdate = () => {
+  window.electronAPI?.installUpdate?.();
 };
 
 // === EXPORT / IMPORT DES DONNÉES ===
@@ -1093,6 +1188,7 @@ const handleGlobalKeydown = (e) => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown);
+  initUpdateListener();
   await initApi();
   checkAuth();
   startAutoRefresh();
@@ -1129,6 +1225,7 @@ onUnmounted(() => {
 .data-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; background: transparent; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .data-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); border-color: var(--border-strong); }
 .data-btn svg { width: 14px; height: 14px; stroke-width: 1.7; }
+.data-btn-full { width: 100%; margin-top: 8px; }
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); contain: layout style; }
 .content-header { display: flex; align-items: center; justify-content: space-between; padding: 24px 32px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); flex-shrink: 0; transform: translateZ(0); }
 .header-left { display: flex; flex-direction: column; gap: 6px; }

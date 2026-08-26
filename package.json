@@ -1,7 +1,7 @@
 {
   "name": "savana",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "Savana - League of Legends Account Manager",
   "author": "Mathis",
@@ -20,6 +20,7 @@
     "electron:serve-external": "concurrently -k \"npm run server\" \"npm run dev\" \"npm run wait-electron\"",
     "build:backend": "node scripts/build-backend.cjs",
     "electron:build": "npm run build:backend && vite build && electron-builder",
+    "release": "npm run build:backend && vite build && electron-builder --win --publish always",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -38,10 +39,6 @@
         ]
       },
       {
-        "from": ".env",
-        "to": "."
-      },
-      {
         "from": "dist",
         "to": "frontend",
         "filter": [
@@ -55,6 +52,13 @@
       "server/**/*",
       "public/**/*",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "TsRun",
+        "repo": "Savana"
+      }
     ],
     "win": {
       "target": [
