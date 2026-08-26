@@ -70,23 +70,22 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
     const friendId = req.params.id;
     const { queue = 'soloq', period = '30' } = req.body;
 
-    // Verify ownership? db.deleteFriend checks user_id, but here strictly we might need a getFriendById
-    // For simplicity assuming valid id/user pair via client context or we skip check for now (low risk)
-
-    // We need the PUUID.
+    // We need the PUUID (la recherche dans les amis de l'utilisateur vérifie aussi la propriété)
     const friends = db.getUserFriends(req.session.user_id);
     const friend = friends.find(f => f.id == friendId);
 
     if (!friend) return res.status(404).json({ error: 'Ami non trouvé' });
 
-    refreshFriendStats(friendId, friend.puuid, queue, period).catch(console.error);
+    refreshFriendStats(friendId, friend.puuid, queue, period, friend.stats_json).catch(console.error);
     res.json({ status: 'Refresh queued' });
 });
 
 /**
  * Helper to refresh stats (Rank + Main Role + Main Champs)
+ * Les stats sont stockées par queue dans stats_by_queue pour ne pas
+ * écraser celles des autres queues.
  */
-async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30') {
+async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30', existingStatsJson = null) {
     console.log(`[FRIENDS] Refreshing ${friendId} (Queue: ${queue})...`);
     try {
         // 1. Rank (Always fetch rank data regardless of queue, used for badge)
@@ -95,14 +94,18 @@ async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30
 
         // 2. Stats (Filtered by Queue)
         const matchIds = await getMatchIds(puuid, queue, period);
-        // Limit to 20 for speed
-        const stats_calc = await calculateStats(puuid, matchIds.slice(0, 20));
+        const stats_calc = await calculateStats(puuid, matchIds);
+
+        const prev = existingStatsJson || {};
+        const statsByQueue = { ...(prev.stats_by_queue || {}) };
+        statsByQueue[queue] = stats_calc;
 
         const stats = {
             soloq,
             flex,
-            stats: stats_calc,
-            filter: { queue, period } // Store filter context if needed
+            stats: stats_calc,               // dernière queue rafraîchie (compat)
+            stats_by_queue: statsByQueue,    // stats par queue
+            filter: { queue, period }
         };
 
         db.updateFriendData(friendId, stats);

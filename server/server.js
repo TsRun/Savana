@@ -3,13 +3,14 @@ import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import cors from 'cors';
 import { config } from './config.js';
-import { initDb } from './models/database.js';
+import { initDb, getOrCreateLocalUser } from './models/database.js';
 import authRoutes from './routes/auth.js';
 import smurfsRoutes from './routes/smurfs.js';
 import preferencesRoutes from './routes/preferences.js';
 import tokensRoutes from './routes/tokens.js';
 import riotClientRoutes from './routes/riotClient.js';
 import friendsRoutes from './routes/friends.js';
+import dataRoutes from './routes/data.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -18,8 +19,8 @@ const currentDirname = path.dirname(currentFilename);
 
 const app = express();
 
-// Middleware
-app.use(express.json());
+// Middleware (limite relevée pour l'import de fichiers d'export volumineux)
+app.use(express.json({ limit: '20mb' }));
 
 // CORS - restreint aux origines locales (le frontend est servi en same-origin).
 // On évite `origin: true` qui reflète n'importe quelle origine et autorise les
@@ -62,7 +63,19 @@ app.use(session({
   }
 }));
 
-// Routes
+// Mode local sans login : toute requête sans session est automatiquement
+// rattachée à l'utilisateur local (le premier existant, sinon créé).
+app.use((req, res, next) => {
+  if (!req.session.user_id) {
+    try {
+      req.session.user_id = getOrCreateLocalUser();
+    } catch (e) {
+      console.error('[AUTH] Auto-login local échoué:', e.message);
+    }
+  }
+  next();
+});
+
 // Routes
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
@@ -71,6 +84,7 @@ app.use('/api/preferences', preferencesRoutes);
 app.use('/api/tokens', tokensRoutes);
 app.use('/api/riot-client', riotClientRoutes);
 app.use('/api/friends', friendsRoutes);
+app.use('/api/data', dataRoutes);
 
 // Servir le Frontend en Production (Unified Server)
 

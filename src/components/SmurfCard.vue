@@ -6,7 +6,15 @@
       <div class="card-header">
         <div class="account-info">
           <div class="account-name">{{ getPseudoName }}</div>
-          <div class="account-tag">{{ getTag }}</div>
+          <div class="account-tag-row">
+            <div class="account-tag">{{ getTag }}</div>
+            <button v-if="smurf.Pseudo" class="riot-id-copy" @click.stop="$emit('copy', smurf.Pseudo, 'Riot ID')" :title="`Copy: ${smurf.Pseudo}`">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="account-level">
           <span class="level-value">{{ smurf.Level || '?' }}</span>
@@ -99,7 +107,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>
         </svg>
-        <span>No recent games</span>
+        <span>{{ noStatsLabel }}</span>
       </div>
 
       <!-- Actions Footer -->
@@ -219,6 +227,10 @@ const props = defineProps({
     required: true
   },
   displayRank: {
+    type: String,
+    default: 'soloq'
+  },
+  queueFilter: {
     type: String,
     default: 'soloq'
   },
@@ -343,7 +355,13 @@ const rankTier = computed(() => {
 
 const rankLP = computed(() => rankData.value.lp || 0);
 
+// En mode "all", le W/L ranked d'une seule queue n'a pas de sens :
+// on affiche le winrate des stats (toutes queues). Sinon, W/L de la
+// queue ranked affichée (saison), avec repli sur les stats.
 const winrate = computed(() => {
+  if (props.queueFilter === 'all' && props.smurf.Stats?.total_games > 0) {
+    return props.smurf.Stats.winrate || 0;
+  }
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
   const rankedTotal = wins + losses;
@@ -353,6 +371,9 @@ const winrate = computed(() => {
 });
 
 const rankedGames = computed(() => {
+  if (props.queueFilter === 'all' && props.smurf.Stats?.total_games > 0) {
+    return props.smurf.Stats.total_games;
+  }
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
   const rankedTotal = wins + losses;
@@ -375,6 +396,14 @@ const kdaClass = computed(() => {
   if (kda >= 3) return 'kda-good';
   if (kda >= 2) return 'kda-average';
   return 'kda-poor';
+});
+
+const QUEUE_LABELS = { soloq: 'SoloQ', flex: 'Flex', all: '' };
+
+const noStatsLabel = computed(() => {
+  if (props.smurf.StatsState === 'pending') return 'Stats pending…';
+  const label = QUEUE_LABELS[props.queueFilter] ?? props.queueFilter;
+  return label ? `No recent ${label} games` : 'No recent games';
 });
 
 const bestChamps = computed(() => {
@@ -453,9 +482,7 @@ const rankIconStyle = computed(() => {
   cursor: pointer;
 }
 
-.card-front:hover {
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.08);
-}
+
 
 /* Card Header */
 .card-header {
@@ -471,15 +498,50 @@ const rankIconStyle = computed(() => {
 }
 
 .account-name {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
+.account-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .account-tag {
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
 }
+
+.riot-id-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+}
+
+.riot-id-copy svg { width: 13px; height: 13px; }
+
+.smurf-card:hover .riot-id-copy { opacity: 1; }
+
+.riot-id-copy:hover {
+  background: var(--accent-soft);
+  color: var(--accent-primary);
+}
+
+.riot-id-copy:active { transform: scale(0.92); }
 
 .account-level {
   display: flex;
@@ -487,21 +549,23 @@ const rankIconStyle = computed(() => {
   align-items: center;
   padding: var(--space-sm) var(--space-md);
   background: var(--accent-gradient);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
 }
 
 .level-value {
+  font-family: var(--font-display);
   font-size: 1.125rem;
   font-weight: 700;
-  color: white;
+  color: var(--bg-primary);
 }
 
 .level-label {
-  font-size: 0.625rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  color: rgba(14, 17, 22, 0.75);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.18em;
 }
 
 /* Rank Section */
@@ -510,7 +574,7 @@ const rankIconStyle = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(242, 244, 241, 0.03);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
 }
@@ -543,32 +607,39 @@ const rankIconStyle = computed(() => {
 .rank-details { display: flex; flex-direction: column; }
 
 .rank-tier {
+  font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.005em;
   color: var(--text-primary);
 }
 
 .rank-lp {
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
 
 .rank-stats { display: flex; gap: var(--space-lg); }
 
 .stat-item { display: flex; flex-direction: column; align-items: center; }
-.stat-value { font-size: 1.125rem; font-weight: 700; }
-.stat-label { font-size: 0.7rem; color: var(--text-muted); }
+.stat-value { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; }
+.stat-label { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-muted); }
 
 .prev-season-badge {
   display: inline-block;
   margin-left: 6px;
-  padding: 2px 6px;
-  font-size: 0.65rem;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
   font-weight: 600;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.2));
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: 4px;
-  color: #f59e0b;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(217, 164, 65, 0.12);
+  border: 1px solid rgba(217, 164, 65, 0.4);
+  border-radius: var(--radius-full);
+  color: var(--warning);
   vertical-align: middle;
 }
 
@@ -618,21 +689,22 @@ const rankIconStyle = computed(() => {
   flex-shrink: 0;
 }
 
-.kda-values { display: flex; align-items: center; gap: 2px; font-size: 0.8rem; font-weight: 600; }
+.kda-values { display: flex; align-items: center; gap: 2px; font-family: var(--font-mono); font-size: 0.76rem; font-weight: 600; }
 .kda-kills { color: var(--success); }
 .kda-deaths { color: var(--error); }
 .kda-assists { color: var(--info); }
 .kda-separator { color: var(--text-muted); font-size: 0.7rem; }
 
 .kda-ratio {
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.2);
 }
 
-.kda-excellent { color: var(--rank-gold); }
+.kda-excellent { color: var(--gold); }
 .kda-good { color: var(--success); }
 .kda-average { color: var(--text-secondary); }
 .kda-poor { color: var(--text-muted); }
@@ -669,7 +741,7 @@ const rankIconStyle = computed(() => {
   gap: 8px;
   margin-top: auto;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-subtle);
   cursor: default;
 }
 
@@ -682,57 +754,58 @@ const rankIconStyle = computed(() => {
   justify-content: center;
   gap: 4px;
   padding: 10px 8px;
-  background: rgba(30, 30, 42, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  color: #a1a1aa;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .action-btn:hover {
-  background: rgba(50, 50, 65, 0.9);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
-.action-btn:active { transform: scale(0.97); }
-.action-btn svg { width: 18px; height: 18px; }
+.action-btn:active { transform: translateY(1px); }
+.action-btn svg { width: 17px; height: 17px; stroke-width: 1.7; }
 
 .action-btn.primary-action {
   flex: 2;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: var(--text-primary);
   border-color: transparent;
-  color: white;
+  color: var(--bg-primary);
   font-weight: 600;
 }
 
 .action-btn.primary-action:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+  background: #d9dcd8;
+  color: var(--bg-primary);
+  border-color: transparent;
 }
 
 .action-btn.danger:hover {
-  background: #ef4444;
-  border-color: #ef4444;
+  background: var(--error);
+  border-color: var(--error);
   color: white;
 }
 
 .action-btn.has-token {
-  background: rgba(34, 197, 94, 0.25);
-  border-color: rgba(34, 197, 94, 0.5);
-  color: #22c55e;
+  background: rgba(78, 192, 122, 0.12);
+  border-color: rgba(78, 192, 122, 0.45);
+  color: var(--success);
 }
 
 .action-btn.session-old {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: rgba(245, 158, 11, 0.5);
-  color: #f59e0b;
+  background: rgba(217, 164, 65, 0.12);
+  border-color: rgba(217, 164, 65, 0.45);
+  color: var(--warning);
 }
 
 .action-btn.session-old:hover {
-  background: rgba(245, 158, 11, 0.4);
-  border-color: #f59e0b;
+  background: rgba(217, 164, 65, 0.22);
+  border-color: var(--warning);
 }
 
 .warning-badge {
@@ -741,8 +814,8 @@ const rankIconStyle = computed(() => {
   right: -4px;
   font-size: 10px;
   font-weight: 700;
-  background: #f59e0b;
-  color: #000;
+  background: var(--warning);
+  color: var(--bg-primary);
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -758,23 +831,15 @@ const rankIconStyle = computed(() => {
 }
 
 .btn-label {
-  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.14em;
 }
 
 /* Glow Effect */
-.card-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--transition-normal);
-  background: radial-gradient(circle at 50% 0%, var(--accent-glow) 0%, transparent 70%);
-}
-
-.card-glow.active { opacity: 1; }
+.card-glow { display: none; }
 
 /* Freshness Badges */
 .freshness-badge {
@@ -782,22 +847,25 @@ const rankIconStyle = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 0.65rem;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .data-warning {
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #f59e0b;
+  background: rgba(217, 164, 65, 0.1);
+  border: 1px solid rgba(217, 164, 65, 0.4);
+  color: var(--warning);
 }
 
 .data-expired {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  background: rgba(209, 104, 104, 0.1);
+  border: 1px solid rgba(209, 104, 104, 0.4);
+  color: var(--error);
   animation: pulse-red 2s ease-in-out infinite;
 }
 
@@ -822,7 +890,7 @@ const rankIconStyle = computed(() => {
   width: 16px;
   height: 16px;
   border: 2px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #6366f1;
+  border-top-color: var(--accent-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -849,13 +917,17 @@ const rankIconStyle = computed(() => {
 }
 
 .back-name {
+  font-family: var(--font-display);
   font-size: 1.15rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
 .back-tag {
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
 }
 
@@ -864,10 +936,10 @@ const rankIconStyle = computed(() => {
   flex-direction: column;
   gap: 12px;
   flex: 1;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-md);
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
 }
 
 .field-group {
@@ -877,11 +949,12 @@ const rankIconStyle = computed(() => {
 }
 
 .field-group label {
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.14em;
 }
 
 .field-row {
@@ -905,7 +978,7 @@ const rankIconStyle = computed(() => {
 .field-input:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: var(--focus-ring);
 }
 
 .field-input::placeholder { color: var(--text-muted); }
@@ -927,7 +1000,7 @@ const rankIconStyle = computed(() => {
 .field-textarea:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: var(--focus-ring);
 }
 
 .field-textarea::placeholder { color: var(--text-muted); }
@@ -949,8 +1022,8 @@ const rankIconStyle = computed(() => {
 .field-copy svg { width: 14px; height: 14px; }
 
 .field-copy:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
+  background: var(--accent-soft);
+  border-color: var(--border-active);
   color: var(--accent-primary);
 }
 
@@ -962,39 +1035,46 @@ const rankIconStyle = computed(() => {
   justify-content: flex-end;
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .btn-back-disconnect {
-  padding: 8px 14px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 6px;
-  color: #ef4444;
+  padding: 0 14px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid rgba(209, 104, 104, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--error);
   cursor: pointer;
-  font-size: 0.75rem;
-  transition: all 0.15s;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
   margin-right: auto;
 }
 
-.btn-back-disconnect:hover { background: rgba(239, 68, 68, 0.25); border-color: #ef4444; }
+.btn-back-disconnect:hover { background: rgba(209, 104, 104, 0.12); border-color: var(--error); }
 
 
 .btn-back-save {
-  padding: 8px 24px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  padding: 0 22px;
+  height: 34px;
+  background: var(--text-primary);
   border: none;
-  border-radius: 6px;
-  color: white;
+  border-radius: var(--radius-sm);
+  color: var(--bg-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.15s ease;
+  transition: background var(--transition-fast);
 }
 
 .btn-back-save:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  background: #d9dcd8;
 }
 
 .btn-back-save:disabled {

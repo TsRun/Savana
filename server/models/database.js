@@ -330,6 +330,23 @@ export function authenticateUser(username, password) {
 }
 
 /**
+ * Mode local sans login : renvoie le premier utilisateur existant,
+ * ou en crée un ("local") avec un mot de passe aléatoire.
+ */
+let localUserId = null;
+export function getOrCreateLocalUser() {
+  if (localUserId) return localUserId;
+  const result = db.exec('SELECT id FROM users ORDER BY id ASC LIMIT 1');
+  if (result.length > 0 && result[0].values.length > 0) {
+    localUserId = result[0].values[0][0];
+  } else {
+    localUserId = createUser('local', crypto.randomBytes(24).toString('hex'));
+    console.log('[DB] Utilisateur local créé (mode sans login)');
+  }
+  return localUserId;
+}
+
+/**
  * Récupère les infos d'un utilisateur
  */
 export function getUserInfo(userId) {
@@ -669,6 +686,122 @@ export function updateSmurfOrder(userId, orderList) {
   saveDatabase();
 }
 
+// === EXPORT / IMPORT ===
+
+const SMURF_EXPORT_FIELDS = [
+  'puuid', 'pseudo', 'username', 'password', 'riot_tokens',
+  'soloq_tier', 'soloq_rank', 'soloq_lp', 'soloq_wins', 'soloq_losses',
+  'flex_tier', 'flex_rank', 'flex_lp', 'flex_wins', 'flex_losses',
+  'level', 'stats_json', 'sort_order', 'session_saved_at', 'last_updated'
+];
+
+/**
+ * Exporte toutes les données d'un utilisateur (secrets déchiffrés)
+ * dans un objet JSON portable.
+ */
+export function exportUserData(userId) {
+  const smurfs = getUserSmurfs(userId).map(s => {
+    const out = {};
+    for (const f of SMURF_EXPORT_FIELDS) out[f] = s[f] !== undefined ? s[f] : null;
+    return out;
+  });
+
+  const friends = getUserFriends(userId).map(f => ({
+    puuid: f.puuid,
+    pseudo: f.pseudo,
+    stats_json: f.stats_json || null,
+    last_updated: f.last_updated || null
+  }));
+
+  const prefs = getUserPreferences(userId);
+
+  return {
+    app: 'savana',
+    version: 1,
+    exported_at: new Date().toISOString(),
+    smurfs,
+    friends,
+    preferences: {
+      stats_period: prefs.stats_period,
+      stats_queue: prefs.stats_queue,
+      tour_completed: prefs.tour_completed
+    }
+  };
+}
+
+/**
+ * Importe des données exportées : upsert des smurfs et amis par PUUID,
+ * mise à jour des préférences. Les secrets sont re-chiffrés à l'écriture.
+ */
+export function importUserData(userId, data) {
+  let smurfCount = 0;
+  let friendCount = 0;
+
+  const existingSmurfs = getUserSmurfs(userId);
+  for (const s of (data.smurfs || [])) {
+    if (!s.puuid || !s.pseudo) continue;
+    const statsJson = s.stats_json ? JSON.stringify(s.stats_json) : null;
+    const riotTokens = s.riot_tokens
+      ? encrypt(typeof s.riot_tokens === 'string' ? s.riot_tokens : JSON.stringify(s.riot_tokens))
+      : null;
+    const values = [
+      s.pseudo, encrypt(s.username || ''), encrypt(s.password || ''), riotTokens,
+      s.soloq_tier ?? null, s.soloq_rank ?? null, s.soloq_lp ?? 0, s.soloq_wins ?? 0, s.soloq_losses ?? 0,
+      s.flex_tier ?? null, s.flex_rank ?? null, s.flex_lp ?? 0, s.flex_wins ?? 0, s.flex_losses ?? 0,
+      s.level ?? 0, statsJson, s.sort_order ?? null, s.session_saved_at ?? null, s.last_updated ?? null
+    ];
+
+    const match = existingSmurfs.find(e => e.puuid === s.puuid);
+    if (match) {
+      db.run(`
+        UPDATE smurfs SET
+          pseudo = ?, username = ?, password = ?, riot_tokens = ?,
+          soloq_tier = ?, soloq_rank = ?, soloq_lp = ?, soloq_wins = ?, soloq_losses = ?,
+          flex_tier = ?, flex_rank = ?, flex_lp = ?, flex_wins = ?, flex_losses = ?,
+          level = ?, stats_json = ?, sort_order = ?, session_saved_at = ?, last_updated = ?
+        WHERE id = ?
+      `, [...values, match.id]);
+    } else {
+      db.run(`
+        INSERT INTO smurfs (
+          user_id, puuid, pseudo, username, password, riot_tokens,
+          soloq_tier, soloq_rank, soloq_lp, soloq_wins, soloq_losses,
+          flex_tier, flex_rank, flex_lp, flex_wins, flex_losses,
+          level, stats_json, sort_order, session_saved_at, last_updated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [userId, s.puuid, ...values]);
+    }
+    smurfCount++;
+  }
+
+  const existingFriends = getUserFriends(userId);
+  for (const f of (data.friends || [])) {
+    if (!f.puuid || !f.pseudo) continue;
+    const statsJson = f.stats_json ? JSON.stringify(f.stats_json) : null;
+    const match = existingFriends.find(e => e.puuid === f.puuid);
+    if (match) {
+      db.run('UPDATE friends SET pseudo = ?, stats_json = ?, last_updated = ? WHERE id = ?',
+        [f.pseudo, statsJson, f.last_updated ?? null, match.id]);
+    } else {
+      db.run('INSERT INTO friends (user_id, puuid, pseudo, stats_json, last_updated) VALUES (?, ?, ?, ?, ?)',
+        [userId, f.puuid, f.pseudo, statsJson, f.last_updated ?? null]);
+    }
+    friendCount++;
+  }
+
+  if (data.preferences) {
+    updateUserPreferences(
+      userId,
+      data.preferences.stats_period,
+      data.preferences.stats_queue,
+      data.preferences.tour_completed
+    );
+  }
+
+  saveDatabase();
+  return { smurfs: smurfCount, friends: friendCount };
+}
+
 /**
  * Close the database connection
  */
@@ -686,6 +819,7 @@ export default {
   closeDb,
   createUser,
   authenticateUser,
+  getOrCreateLocalUser,
   getUserInfo,
   addSmurf,
   getUserSmurfs,
@@ -699,6 +833,8 @@ export default {
   getUserPreferences,
   updateUserPreferences,
   resetAllSmurfData,
+  exportUserData,
+  importUserData,
   // Friends
   addFriend,
   getUserFriends,

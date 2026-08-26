@@ -31,14 +31,20 @@
                 v-model="inputValues[input.key]"
                 class="confirm-input"
               />
-              <button v-if="inputValues[input.key]" class="confirm-copy-btn" @click="copyValue(inputValues[input.key])" title="Copy">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button v-if="inputValues[input.key]" class="confirm-copy-btn" :class="{ copied: copiedKey === input.key }" @click="copyInput(input.key)" :title="copyShortcutFor(input.key) ? `Copy (${copyShortcutFor(input.key)})` : 'Copy'">
+                <svg v-if="copiedKey === input.key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                   <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
                 </svg>
               </button>
             </div>
           </div>
+          <p v-if="hasCredentialInputs" class="confirm-shortcut-hint">
+            Ctrl+U : copier l'username &middot; Ctrl+P : copier le mot de passe
+          </p>
         </div>
         <div class="confirm-actions">
           <button v-if="thirdText" @click="handleThird" class="btn btn-danger-sm">
@@ -57,7 +63,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -91,6 +97,9 @@ const confirmButtonClass = computed(() => {
 
 const getInputData = () => ({ ...inputValues });
 
+const copiedKey = ref('');
+let copiedTimer = null;
+
 const copyValue = (text) => {
   if (window.electronAPI?.writeToClipboard) {
     window.electronAPI.writeToClipboard(text);
@@ -98,6 +107,43 @@ const copyValue = (text) => {
     navigator.clipboard.writeText(text);
   }
 };
+
+const copyInput = (key) => {
+  const value = inputValues[key];
+  if (!value) return;
+  copyValue(value);
+  copiedKey.value = key;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => { copiedKey.value = ''; }, 1200);
+};
+
+// Raccourcis copie : Ctrl+U (username) / Ctrl+P (password)
+const COPY_SHORTCUTS = { u: 'username', p: 'password' };
+
+const copyShortcutFor = (key) => {
+  const letter = Object.keys(COPY_SHORTCUTS).find(l => COPY_SHORTCUTS[l] === key);
+  return letter ? `Ctrl+${letter.toUpperCase()}` : '';
+};
+
+const hasCredentialInputs = computed(() =>
+  props.inputs.some(i => i.key === 'username' || i.key === 'password')
+);
+
+const handleShortcut = (e) => {
+  if (!props.isOpen || !props.inputs.length) return;
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const targetKey = COPY_SHORTCUTS[e.key.toLowerCase()];
+  if (!targetKey || inputValues[targetKey] === undefined) return;
+  e.preventDefault();
+  e.stopPropagation();
+  copyInput(targetKey);
+};
+
+onMounted(() => window.addEventListener('keydown', handleShortcut, true));
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleShortcut, true);
+  clearTimeout(copiedTimer);
+});
 
 const handleConfirm = () => emit('confirm', getInputData());
 const handleCancel = () => emit('cancel', getInputData());
@@ -113,19 +159,20 @@ watch(() => props.autoConfirm, (val) => {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(9, 11, 14, 0.6);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: var(--z-dialog);
   animation: fadeIn 0.15s ease;
 }
 
 .confirm-dialog {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   padding: 28px;
   width: 90%;
   max-width: 400px;
@@ -148,23 +195,25 @@ watch(() => props.autoConfirm, (val) => {
 }
 
 .dialog-danger .confirm-icon {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(209, 104, 104, 0.12);
   color: var(--error);
 }
 
 .dialog-warning .confirm-icon {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background: rgba(217, 164, 65, 0.12);
+  color: var(--warning);
 }
 
 .dialog-info .confirm-icon {
-  background: rgba(99, 102, 241, 0.15);
+  background: var(--accent-soft);
   color: var(--accent-primary);
 }
 
 .confirm-title {
-  font-size: 1.25rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
   margin-bottom: 8px;
 }
@@ -191,9 +240,12 @@ watch(() => props.autoConfirm, (val) => {
 }
 
 .confirm-input-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .confirm-input-row {
@@ -208,15 +260,16 @@ watch(() => props.autoConfirm, (val) => {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 0.9rem;
   outline: none;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   min-width: 0;
 }
 
 .confirm-input:focus {
   border-color: var(--accent-primary);
+  box-shadow: var(--focus-ring);
 }
 
 .confirm-copy-btn {
@@ -225,9 +278,9 @@ watch(() => props.autoConfirm, (val) => {
   justify-content: center;
   width: 32px;
   height: 32px;
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
@@ -240,9 +293,24 @@ watch(() => props.autoConfirm, (val) => {
 }
 
 .confirm-copy-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
+  background: var(--accent-soft);
   color: var(--accent-primary);
   border-color: var(--accent-primary);
+}
+
+.confirm-copy-btn.copied {
+  background: rgba(78, 192, 122, 0.12);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.confirm-shortcut-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 2px;
+  text-align: center;
 }
 
 .confirm-actions {
@@ -251,55 +319,19 @@ watch(() => props.autoConfirm, (val) => {
   justify-content: center;
 }
 
-.btn {
+/* .btn, .btn-primary, .btn-secondary, .btn-danger : styles globaux (style.css) */
+.confirm-actions .btn {
   padding: 10px 24px;
-  border-radius: 10px;
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  border: none;
-  transition: all 0.2s;
-}
-
-.btn-secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-secondary:hover {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.btn-primary {
-  background: var(--accent-gradient);
-  color: white;
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
-
-.btn-danger {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: white;
-}
-
-.btn-danger:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
 }
 
 .btn-danger-sm {
   background: transparent;
-  color: var(--error, #ef4444);
-  border: 1px solid var(--error, #ef4444);
+  color: var(--error);
+  border: 1px solid var(--error);
 }
 
 .btn-danger-sm:hover {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(209, 104, 104, 0.12);
 }
 
 @keyframes fadeIn {

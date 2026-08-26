@@ -49,29 +49,30 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 20px;
-  background: rgba(17, 17, 27, 0.92);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 10px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  z-index: 300;
+  background: var(--text-primary);
+  border: none;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-status);
   max-width: 500px;
   pointer-events: none;
 }
 
 .status-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(99, 102, 241, 0.2);
-  border-top-color: #6366f1;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(14, 17, 22, 0.2);
+  border-top-color: var(--bg-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   flex-shrink: 0;
 }
 
 .status-text {
-  color: #d4d4d8;
-  font-size: 0.8rem;
+  color: var(--bg-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -88,21 +89,22 @@ onMounted(() => {
 .status-progress-track {
   width: 60px;
   height: 3px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
+  background: rgba(14, 17, 22, 0.15);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
 .status-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
-  border-radius: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-full);
   transition: width 0.4s ease;
 }
 
 .status-progress-label {
-  font-size: 0.7rem;
-  color: #71717a;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: rgba(14, 17, 22, 0.6);
 }
 
 /* Transitions */

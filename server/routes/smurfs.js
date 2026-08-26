@@ -37,26 +37,18 @@ router.get('/', requireAuth, (req, res) => {
   const prefs = db.getUserPreferences(userId);
   const period = prefs?.stats_period || '30';
   const queue = prefs?.stats_queue || 'soloq';
-  
-  // Map queue names to legacy column names
-  const legacyQueueMap = { 'soloq': 'ranked', 'flex': 'ranked', 'all': 'all' };
-  const legacyQueue = legacyQueueMap[queue] || 'ranked';
-  const legacyStatsKey = `stats_${period}_${legacyQueue}`;
+
   const dynamicStatsKey = `stats_${period}_${queue}`;
 
   const formattedSmurfs = smurfs.map(smurf => {
-    // Try dynamic stats_json first, then legacy columns
+    // Stats strictement pour la combinaison (période, queue) demandée.
+    // 'pending' = jamais calculé pour ce filtre ; 'empty' = calculé mais 0 partie.
     let stats = null;
-    if (smurf.stats_json && smurf.stats_json[dynamicStatsKey]) {
-      stats = smurf.stats_json[dynamicStatsKey];
-    } else if (smurf[legacyStatsKey]) {
-      stats = smurf[legacyStatsKey];
-    } else if (smurf.stats_json) {
-      // Fallback: try any available stats in stats_json
-      const keys = Object.keys(smurf.stats_json);
-      if (keys.length > 0) {
-        stats = smurf.stats_json[keys[0]];
-      }
+    let statsState = 'pending';
+    const statsJson = smurf.stats_json || {};
+    if (Object.prototype.hasOwnProperty.call(statsJson, dynamicStatsKey)) {
+      stats = statsJson[dynamicStatsKey];
+      statsState = stats ? 'ok' : 'empty';
     }
 
     return {
@@ -80,6 +72,7 @@ router.get('/', requireAuth, (req, res) => {
       } : null,
       Level: smurf.level,
       Stats: stats,
+      StatsState: statsState,
       last_updated: smurf.last_updated,
       id: smurf.id,
       hasToken: !!smurf.riot_tokens,
@@ -260,14 +253,7 @@ async function updateSingleSmurf(smurfId) {
     const stats = await calculateStats(currentPuuid, matchIds);
 
     // 3. Prepare Update
-    const updateData = {
-      level,
-      flex_tier: flex.tier,
-      flex_rank: flex.rank,
-      flex_lp: flex.lp,
-      flex_wins: flex.wins,
-      flex_losses: flex.losses
-    };
+    const updateData = { level };
 
     // Update Riot ID if changed
     if (currentRiotId && currentRiotId !== smurf.pseudo) {
@@ -275,15 +261,9 @@ async function updateSingleSmurf(smurfId) {
       updateData.pseudo = currentRiotId;
     }
 
-    // Update Legacy Stats Columns (map soloq -> ranked for backward compat)
-    const legacyQ = (queue === 'soloq' || queue === 'flex') ? 'ranked' : queue;
-    const legacyKey = `stats_${period}_${legacyQ}`;
-    if (legacyKey === 'stats_30_ranked') updateData.stats_30_ranked = stats;
-    if (legacyKey === 'stats_season_ranked') updateData.stats_season_ranked = stats;
-    if (legacyKey === 'stats_30_all') updateData.stats_30_all = stats;
-    if (legacyKey === 'stats_season_all') updateData.stats_season_all = stats;
-
     // Update Dynamic Stats JSON
+    // (Les colonnes legacy stats_30_ranked/etc. ne sont plus écrites : le mapping
+    // flex->ranked contaminait les stats SoloQ avec des stats Flex et inversement.)
     let statsJson = {};
     try {
       // smurf.stats_json sent by db is string or null
@@ -305,6 +285,19 @@ async function updateSingleSmurf(smurfId) {
       console.log(`   [KEEP] On garde le rang ${smurf.soloq_tier} (Unranked sur l'API)`);
     } else {
       updateData.soloq_tier = null;
+    }
+
+    // Même mémoire de rang pour la Flex
+    if (flex.tier) {
+      updateData.flex_tier = flex.tier;
+      updateData.flex_rank = flex.rank;
+      updateData.flex_lp = flex.lp;
+      updateData.flex_wins = flex.wins;
+      updateData.flex_losses = flex.losses;
+    } else if (smurf.flex_tier) {
+      console.log(`   [KEEP] On garde le rang Flex ${smurf.flex_tier} (Unranked sur l'API)`);
+    } else {
+      updateData.flex_tier = null;
     }
 
     // 4. Update DB

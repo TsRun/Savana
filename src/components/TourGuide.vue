@@ -92,22 +92,22 @@ const steps = [
   },
   {
     target: '.btn-danger-outline',
-    title: '⚠️ SUPER IMPORTANT',
+    title: 'SUPER IMPORTANT',
     content: 'Pour changer de compte, utilisez TOUJOURS ce bouton "Reset Client". NE VOUS DÉCONNECTEZ JAMAIS DANS LE JEU (Logout), cela invaliderait votre session sauvegardée !'
   },
   {
     target: '.btn-primary',
-    title: '💾 Sauvegarder un compte',
+    title: 'Sauvegarder un compte',
     content: '1. Connectez-vous au Riot Client avec le compte souhaité.\n2. Cliquez sur "Save Account" pour l\'enregistrer automatiquement dans Savana.'
   },
   {
     target: '.btn-primary',
-    title: '⏳ Expiration des sessions',
+    title: 'Expiration des sessions',
     content: 'Les sessions sauvegardées expirent au bout de quelques jours. Pensez à les re-sauvegarder régulièrement ! Un badge orange (7j+) ou rouge (14j+) apparaîtra sur la carte pour vous prévenir.'
   },
   {
     target: '.btn-update-all',
-    title: '🔄 Refresh Stats vs Update All',
+    title: 'Refresh Stats vs Update All',
     content: '"Refresh Stats" met à jour les stats rapidement (cooldown 10 min). "Update All" force la mise à jour complète de tous les comptes : rangs, niveaux et stats, sans cooldown.'
   },
   // Demo Card Steps
@@ -119,7 +119,7 @@ const steps = [
   },
   {
     target: '.tour-demo-card .action-btn.primary-action',
-    title: '▶️ Charger (Play)',
+    title: 'Charger (Play)',
     content: 'Le bouton le plus important ! Cliquez sur LOAD pour fermer Riot, injecter la session et lancer le jeu. Connexion automatique !',
     showDemo: true,
     highlightDemoSelector: '.action-btn.primary-action'
@@ -257,7 +257,7 @@ watch(currentStep, () => {
 .tour-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--z-tour);
   background: rgba(0, 0, 0, 0.5); /* Dim background */
 }
 
@@ -266,23 +266,23 @@ watch(currentStep, () => {
    Here we just use a border to highlight */
 .tour-highlight {
   position: absolute;
-  border: 2px solid #6366f1;
+  border: 2px solid var(--accent-primary);
   border-radius: 8px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75); /* The "cutout" trick */
   pointer-events: none;
   transition: all 0.3s ease;
-  z-index: 10001;
+  z-index: calc(var(--z-tour) + 1);
 }
 
 .tour-tooltip {
   position: absolute;
   width: 300px;
-  background: #1e1e24;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
   padding: 20px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  z-index: 10002;
+  z-index: calc(var(--z-tour) + 2);
   transition: all 0.3s ease;
 }
 
@@ -294,25 +294,29 @@ watch(currentStep, () => {
 }
 
 .step-counter {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.1);
-  padding: 2px 8px;
-  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--accent-primary);
+  background: var(--accent-soft);
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
 }
 
 .tour-header h3 {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: white;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
   margin: 0;
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: #a1a1aa;
+  color: var(--text-secondary);
   font-size: 1.5rem;
   cursor: pointer;
   line-height: 1;
@@ -322,11 +326,11 @@ watch(currentStep, () => {
 }
 
 .btn-close:hover {
-  color: white;
+  color: var(--text-primary);
 }
 
 .tour-content {
-  color: #a1a1aa;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   line-height: 1.5;
   margin-bottom: 20px;
@@ -339,34 +343,37 @@ watch(currentStep, () => {
 }
 
 .btn-tour {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 600;
+  height: 32px;
+  padding: 0 15px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
-  border: none;
-  transition: all 0.2s;
+  border: 1px solid transparent;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .btn-tour.primary {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: white;
+  background: var(--text-primary);
+  color: var(--bg-primary);
 }
 
 .btn-tour.primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  background: #d9dcd8;
 }
 
 .btn-tour.secondary {
   background: transparent;
-  color: #a1a1aa;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
 }
 
 .btn-tour.secondary:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: white;
+  color: var(--text-primary);
 }
 
 .demo-card-container-centered {
@@ -374,7 +381,7 @@ watch(currentStep, () => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 10001;
+  z-index: calc(var(--z-tour) + 1);
   pointer-events: none;
 }
 
@@ -386,7 +393,7 @@ watch(currentStep, () => {
 }
 
 .tour-demo-card {
-    background: #1e1e24; /* Match tooltip or slightly simpler */
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border-color);
 }
 </style>

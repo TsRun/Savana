@@ -144,37 +144,33 @@ const submit = async () => {
 </script>
 
 <style scoped>
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 1000; animation: fadeIn 0.2s ease; }
-.modal-card { background: var(--bg-secondary); width: 400px; border-radius: 16px; border: 1px solid var(--border-subtle); box-shadow: 0 20px 40px rgba(0,0,0,0.4); overflow: hidden; animation: slideUp 0.3s ease; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: var(--z-modal); animation: fadeIn 0.2s ease; }
+.modal-card { background: var(--bg-secondary); width: 400px; border-radius: var(--radius-lg); border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg); overflow: hidden; animation: slideUp 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; }
-.modal-header h3 { margin: 0; font-size: 1.125rem; font-weight: 600; color: var(--text-primary); }
+.modal-header h3 { margin: 0; font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
 .close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; transition: color 0.15s; line-height: 1; }
 .close-btn:hover { color: var(--text-primary); }
 .modal-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
 
-.riot-input-container { display: flex; align-items: center; width: 100%; padding: 0 16px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 8px; transition: all 0.2s; }
-.riot-input-container.focused { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
-.riot-input-container.error { border-color: var(--error); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
+.riot-input-container { display: flex; align-items: center; width: 100%; padding: 0 16px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+.riot-input-container.focused { border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
+.riot-input-container.error { border-color: var(--error); box-shadow: inset 0 0 0 1px var(--error); }
 .input-part { background: transparent; border: none; padding: 12px 0; color: var(--text-primary); font-size: 0.95rem; outline: none; }
 .name-part { flex: 1; }
 .tag-part { width: 70px; text-align: center; }
 .separator { color: var(--text-muted); font-weight: 600; padding: 0 8px; user-select: none; }
-.hint { display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: -8px; margin-bottom: 8px; }
+.hint { display: block; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.03em; color: var(--text-muted); margin-top: -8px; margin-bottom: 8px; }
 
-.error-msg { color: var(--error); font-size: 0.875rem; background: rgba(239, 68, 68, 0.1); padding: 8px 12px; border-radius: 6px; }
+.error-msg { color: var(--error); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.03em; background: rgba(209, 104, 104, 0.08); border: 1px solid rgba(209, 104, 104, 0.3); padding: 8px 12px; border-radius: var(--radius-sm); }
 .modal-footer { padding-top: 16px; display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid var(--border-subtle); margin-top: auto; }
 
-.btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s; }
-.btn-ghost { background: transparent; color: var(--text-secondary); }
-.btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
-.btn-primary { background: var(--accent-gradient); color: white; display: flex; align-items: center; justify-content: center; min-width: 100px; }
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-primary:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+/* .btn, .btn-ghost, .btn-primary : styles globaux (style.css) */
+.btn-primary { min-width: 100px; }
 .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 6px; color: var(--text-secondary); }
+label { display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 7px; color: var(--text-muted); }
 </style>

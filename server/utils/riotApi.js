@@ -145,7 +145,10 @@ export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
   if (period === '30') {
     startTime = currentTime - (30 * 24 * 60 * 60);
   } else if (period === 'season') {
-    const seasonStart = new Date('2025-01-08T00:00:00Z');
+    // Début de saison ~8 janvier de l'année en cours (année précédente si on est avant)
+    const now = new Date();
+    let seasonStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 8));
+    if (now < seasonStart) seasonStart = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 8));
     startTime = Math.floor(seasonStart.getTime() / 1000);
   } else {
     // 'all' or fallback: look back 6 months
@@ -208,6 +211,9 @@ export async function calculateStats(puuid, matchIds) {
   for (const data of matches) {
     const participant = data.info?.participants?.find(p => p.puuid === puuid);
     if (!participant) continue;
+
+    // Exclure les remakes (early surrender ou partie < 5 min)
+    if (participant.gameEndedInEarlySurrender || (data.info?.gameDuration || 0) < 300) continue;
 
     gamesCount++;
     totalKills += participant.kills || 0;

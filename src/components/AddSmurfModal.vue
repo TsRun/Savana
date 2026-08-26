@@ -10,7 +10,7 @@
         <div class="import-section">
           <button type="button" class="btn btn-import" @click="handleImport" :disabled="loading">
             <span v-if="importing">Détection...</span>
-            <span v-else>📲 Importer la session active</span>
+            <span v-else>Importer la session active</span>
           </button>
           <div class="divider"><span>OU</span></div>
         </div>
@@ -263,14 +263,15 @@ async function performSubmit(autoSaveSession = false) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   animation: fadeIn 0.2s ease;
 }
 
 .modal-card {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   padding: 24px;
   width: 90%;
   max-width: 400px;
@@ -285,8 +286,10 @@ async function performSubmit(autoSaveSession = false) {
 }
 
 .modal-header h3 {
-  font-size: 1.25rem;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
@@ -305,10 +308,13 @@ async function performSubmit(autoSaveSession = false) {
 
 label {
   display: block;
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 500;
-  margin-bottom: 6px;
-  color: var(--text-secondary);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+  color: var(--text-muted);
 }
 
 .form-group input {
@@ -325,12 +331,12 @@ label {
 .form-group input:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  box-shadow: var(--focus-ring);
 }
 
 .form-group input.input-error {
   border-color: var(--error);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+  box-shadow: inset 0 0 0 1px var(--error);
 }
 
 .form-group input::placeholder {
@@ -349,11 +355,13 @@ label {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 8px;
+  background: rgba(209, 104, 104, 0.08);
+  border: 1px solid rgba(209, 104, 104, 0.3);
+  border-radius: var(--radius-sm);
   color: var(--error);
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
   margin-bottom: 16px;
   animation: shake 0.3s ease;
 }
@@ -400,18 +408,18 @@ label {
   padding: 0 16px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  transition: all 0.2s;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .riot-input-container.focused {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  box-shadow: var(--focus-ring);
 }
 
 .riot-input-container.error {
   border-color: var(--error);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+  box-shadow: inset 0 0 0 1px var(--error);
 }
 
 .input-part {
@@ -442,7 +450,9 @@ label {
 .hint {
   display: block;
   margin-top: 6px;
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
   color: var(--text-muted);
 }
 
@@ -464,7 +474,7 @@ label {
   padding: 10px 14px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 0.9rem;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -474,7 +484,7 @@ label {
 .input-field:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  box-shadow: var(--focus-ring);
 }
 
 .input-field::placeholder {
@@ -490,14 +500,18 @@ label {
 
 .btn-import {
   width: 100%;
-  padding: 12px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px dashed var(--accent-primary);
-  color: var(--accent-primary);
-  border-radius: 8px;
-  font-weight: 600;
+  height: 40px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -505,8 +519,8 @@ label {
 }
 
 .btn-import:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.2);
-  transform: translateY(-1px);
+  background: var(--bg-tertiary);
+  border-color: var(--text-primary);
 }
 
 .btn-import:disabled {
@@ -519,8 +533,10 @@ label {
   align-items: center;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  font-weight: 500;
 }
 
 .divider::before,

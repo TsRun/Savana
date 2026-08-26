@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -32,6 +32,10 @@ const RIOT_PATH = {
 };
 
 function createWindow() {
+  // Supprime le menu par défaut : ses accélérateurs (Ctrl+R = reload)
+  // masqueraient le raccourci Ctrl+R "actualiser les élos" de l'app.
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,

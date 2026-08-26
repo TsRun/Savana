@@ -18,15 +18,14 @@
       </div>
     </div>
     <div class="content-wrapper" :class="{ 'with-titlebar': isElectron }">
-      <Login v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
-      <div v-else class="main-layout">
+      <div class="main-layout">
       <aside class="sidebar">
         <div class="sidebar-header">
           <div class="logo">
             <img src="/SavanaLogo.jpg" alt="Savana" class="logo-img" />
             <div class="logo-text">
               <span class="logo-title">Savana</span>
-              <span class="logo-subtitle">v2.0</span>
+              <span class="logo-subtitle eyebrow">No 02 &middot; v2.0</span>
             </div>
           </div>
         </div>
@@ -48,19 +47,24 @@
           </a>
         </nav>
         <div class="sidebar-footer">
-          <div class="user-profile">
-            <div class="user-avatar">{{ currentUser?.username?.charAt(0).toUpperCase() }}</div>
-            <div class="user-info">
-              <span class="user-name">{{ currentUser?.username }}</span>
-              <span class="user-status">Online</span>
-            </div>
-            <button @click="logout" class="logout-btn" title="Logout">
+          <div class="data-actions">
+            <button @click="exportData" class="data-btn" title="Exporter tous les comptes, amis et préférences dans un fichier JSON">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
+              <span>Exporter</span>
             </button>
+            <button @click="triggerImport" class="data-btn" title="Réimporter un fichier d'export Savana (.json)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span>Importer</span>
+            </button>
+            <input ref="importFileInput" type="file" accept=".json,application/json" style="display: none;" @change="handleImportFile" />
           </div>
         </div>
       </aside>
@@ -69,8 +73,8 @@
       <main v-if="currentView === 'accounts'" class="main-content">
         <header class="content-header">
           <div class="header-left">
-            <h1 class="page-title">My Accounts</h1>
-            <p class="page-subtitle">{{ smurfs.length }} accounts</p>
+            <h1 class="page-title">My <em class="script">Accounts</em></h1>
+            <p class="page-subtitle eyebrow">{{ smurfs.length }} accounts &middot; ranked tracker</p>
           </div>
           <div class="header-actions">
             <div class="search-box">
@@ -84,7 +88,14 @@
                   <option value="all">All</option>
               </select>
             </div>
-            <button @click="openAddModal" class="btn btn-add-account" title="Add a new account by Riot ID">
+            <button @click="refreshElo(true)" :disabled="loading" class="btn btn-secondary" title="Actualiser les élos et stats de tous les comptes (Ctrl+R)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px;">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+              </svg>
+              Refresh
+            </button>
+            <button @click="openAddModal" class="btn btn-success-soft" title="Add a new account by Riot ID">
               + Add Account
             </button>
             <button @click="saveAllSessions" :disabled="loading" class="btn btn-primary" title="Re-login each account via Riot Client and re-save their sessions. Uses existing sessions first, falls back to manual login.">
@@ -112,6 +123,7 @@
             <SmurfCard
               :smurf="smurf"
               :displayRank="displayRank"
+              :queueFilter="statsQueue"
               :flippedId="flippedCardId"
               @copy="handleCopy"
               @delete="deleteSmurf"
@@ -125,7 +137,12 @@
           </div>
         </div>
         <div v-if="filteredSmurfs.length === 0 && !loading" class="empty-state">
-          <div class="empty-icon">No Data</div>
+          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <line x1="19" y1="8" x2="19" y2="14"/>
+            <line x1="22" y1="11" x2="16" y2="11"/>
+          </svg>
           <h3>No accounts found</h3>
           <button @click="openAddModal" class="btn btn-primary">+ Add Account</button>
         </div>
@@ -133,9 +150,10 @@
       
       <!-- VIEW: FRIENDS -->
       <main v-if="currentView === 'friends'" class="main-content">
-        <FriendsView 
+        <FriendsView
           :friends="friends"
           :smurfs="smurfs"
+          :smurfsQueue="statsQueue"
           v-model:showSmurfs="showSmurfsInFriends"
           :loading="loadingFriends"
           @open-add="showAddFriendModal = true"
@@ -177,8 +195,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
-import Login from './components/Login.vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import AddSmurfModal from './components/AddSmurfModal.vue';
 import AddFriendModal from './components/AddFriendModal.vue';
 import SmurfCard from './components/SmurfCard.vue';
@@ -192,7 +209,8 @@ const friends = ref([]);
 const loading = ref(false);
 const loadingFriends = ref(false);
 const error = ref(null);
-const displayRank = ref('soloq');
+// Le rang affiché suit le filtre de queue (Flex sélectionnée => élo Flex)
+const displayRank = computed(() => statsQueue.value === 'flex' ? 'flex' : 'soloq');
 const searchQuery = ref('');
 const isAuthenticated = ref(false);
 const currentUser = ref(null);
@@ -229,10 +247,39 @@ watch(statsQueue, async (newQueue) => {
       body: JSON.stringify({ stats_queue: newQueue })
     });
     await fetchSmurfs();
+    // Les comptes sans stats calculées pour cette queue sont mis en file de refresh
+    await refreshPendingStats(newQueue);
   } catch (e) {
     console.error('Failed to update queue preference:', e);
   }
 });
+
+// Calcule les stats manquantes pour la queue sélectionnée, puis re-fetch
+// périodiquement tant que des comptes sont en attente.
+let pendingPollTimer = null;
+const refreshPendingStats = async (queue) => {
+  const pending = smurfs.value.filter(s => s.StatsState === 'pending');
+  if (pending.length === 0) return;
+
+  showToast(`Calcul des stats ${queue} pour ${pending.length} compte(s)...`, 'info');
+  await Promise.all(pending.map(s =>
+    fetch(`${apiUrl.value}/smurfs/${s.id}/refresh`, { method: 'POST', credentials: 'include' })
+      .catch(() => {})
+  ));
+
+  clearInterval(pendingPollTimer);
+  let attempts = 0;
+  pendingPollTimer = setInterval(async () => {
+    attempts++;
+    await fetchSmurfs();
+    const stillPending = smurfs.value.some(s => s.StatsState === 'pending');
+    if (!stillPending || attempts >= 30) {
+      clearInterval(pendingPollTimer);
+      pendingPollTimer = null;
+      if (!stillPending) showToast('Stats à jour', 'success');
+    }
+  }, 10000);
+};
 
 // Confirm dialog state
 const confirmDialog = ref({
@@ -455,22 +502,60 @@ const checkAuth = async () => {
   } catch (e) { console.error('Auth check failed:', e); }
 };
 
-const handleLoginSuccess = (data) => {
-  isAuthenticated.value = true;
-  currentUser.value = { ...data.user, preferences: data.preferences };
-  fetchSmurfs();
-  fetchFriends();
-  // Start auto-refresh and trigger initial stats refresh
-  startAutoRefresh();
-  refreshElo();
+// === EXPORT / IMPORT DES DONNÉES ===
+
+const importFileInput = ref(null);
+
+const exportData = async () => {
+  try {
+    const res = await fetch(apiUrl.value + '/data/export', { credentials: 'include' });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `savana-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Données exportées', 'success');
+  } catch (e) {
+    showToast("Échec de l'export", 'error');
+  }
 };
 
-const logout = async () => {
-  try { await fetch(apiUrl.value + '/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
-  isAuthenticated.value = false;
-  currentUser.value = null;
-  smurfs.value = [];
-  friends.value = [];
+const triggerImport = () => importFileInput.value?.click();
+
+const handleImportFile = async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+
+  try {
+    const data = JSON.parse(await file.text());
+    const confirmed = await showConfirm({
+      title: 'Importer les données',
+      message: `Importer ${data.smurfs?.length || 0} compte(s) et ${data.friends?.length || 0} ami(s) ?\nLes comptes existants (même PUUID) seront mis à jour.`,
+      confirmText: 'Importer',
+      cancelText: 'Annuler',
+      type: 'warning'
+    });
+    if (confirmed.action !== 'confirm') return;
+
+    const res = await fetch(apiUrl.value + '/data/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Import failed');
+
+    showToast(`Import terminé : ${result.smurfs} compte(s), ${result.friends} ami(s)`, 'success');
+    await fetchSmurfs();
+    await fetchFriends();
+  } catch (err) {
+    showToast("Échec de l'import : " + err.message, 'error');
+  }
 };
 
 const getSafeFilename = (pseudo) => {
@@ -528,6 +613,15 @@ const fetchFriends = async () => {
 };
 
 const handleDeleteFriend = async (id) => {
+  const confirmed = await showConfirm({
+    title: 'Retirer cet ami',
+    message: 'Retirer cet ami de votre liste ?',
+    confirmText: 'Retirer',
+    cancelText: 'Annuler',
+    type: 'danger'
+  });
+  if (confirmed.action !== 'confirm') return;
+
   try {
     const res = await fetch(`${apiUrl.value}/friends/${id}`, { method: 'DELETE', credentials: 'include' });
     if (res.ok) {
@@ -543,16 +637,18 @@ const handleRefreshFriend = async (payload) => {
   
   showToast(`Refreshing friend stats (${queue})...`, 'info');
   try {
-    await fetch(`${apiUrl.value}/friends/${friendId}/refresh`, { 
-      method: 'POST', 
+    await fetch(`${apiUrl.value}/friends/${friendId}/refresh`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', 
-      body: JSON.stringify({ queue }) 
+      credentials: 'include',
+      body: JSON.stringify({ queue })
     });
+    // Le calcul prend ~30s (rate limit API) : re-fetch au début puis à la fin
+    setTimeout(() => fetchFriends(), 3000);
     setTimeout(() => {
       fetchFriends();
       showToast('Friend stats updated', 'success');
-    }, 2000);
+    }, 35000);
   } catch (e) {
     showToast('Failed to refresh friend', 'error');
   }
@@ -987,73 +1083,69 @@ const tourSeen = computed(() => {
     return !!(currentUser.value?.preferences?.tour_completed);
 });
 
-onMounted(async () => { 
+// Ctrl+R / Cmd+R : actualiser les élos (au lieu de recharger la fenêtre)
+const handleGlobalKeydown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (!loading.value && !confirmDialog.value.isOpen) refreshElo(true);
+  }
+};
+
+onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown);
   await initApi();
   checkAuth();
   startAutoRefresh();
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
+  if (pendingPollTimer) clearInterval(pendingPollTimer);
+  if (autoRefreshInterval) clearInterval(autoRefreshInterval);
 });
 </script>
 
 <style scoped>
 .app-container { height: 100%; width: 100%; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; }
-.titlebar { -webkit-app-region: drag; height: 32px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; padding-left: 16px; flex-shrink: 0; }
-.titlebar-title { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--text-secondary); }
-.titlebar-controls { -webkit-app-region: no-drag; display: flex; height: 100%; }
-.titlebar-btn { width: 46px; height: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; transition: background-color 0.1s ease, color 0.1s ease; }
-.titlebar-btn:hover { background: var(--bg-tertiary); }
-.titlebar-btn.close:hover { background: var(--error); color: white; }
-.titlebar-btn svg { width: 10px; height: 10px; }
+/* .titlebar* : styles globaux (style.css) */
+.titlebar { border-bottom: 1px solid var(--border-subtle); padding-left: 16px; }
 .main-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; height: 100%; }
 .content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .content-wrapper.with-titlebar { margin-top: 32px; }
 .sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; flex-shrink: 0; }
 .sidebar-header { padding: 24px; border-bottom: 1px solid var(--border-subtle); }
 .logo { display: flex; align-items: center; gap: 16px; }
-.logo-img { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; }
-.logo-text { display: flex; flex-direction: column; }
-.logo-title { font-weight: 700; font-size: 1rem; color: var(--text-primary); }
-.logo-subtitle { font-size: 0.75rem; color: var(--text-muted); }
-.titlebar-icon { width: 24px; height: 24px; background: var(--accent-gradient); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.625rem; color: white; }
-.titlebar-logo { width: 20px; height: 20px; border-radius: 4px; object-fit: contain; }
-.sidebar-nav { flex: 1; padding: 16px; }
-.nav-item { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-radius: 10px; color: var(--text-secondary); font-weight: 500; text-decoration: none; transition: background-color 0.15s ease, color 0.15s ease; }
+.logo-img { width: 40px; height: 40px; border-radius: var(--radius-md); object-fit: contain; }
+.logo-text { display: flex; flex-direction: column; gap: 3px; }
+.logo-title { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--text-primary); }
+.titlebar-logo { width: 18px; height: 18px; border-radius: var(--radius-xs); object-fit: contain; }
+.sidebar-nav { flex: 1; padding: 16px 12px; }
+.nav-item { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border-radius: var(--radius-sm); color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; text-decoration: none; border-bottom: none; transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast); }
 .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-.nav-item.active { background: var(--accent-gradient); color: white; }
-.nav-icon { width: 20px; height: 20px; }
+.nav-item.active { background: var(--bg-tertiary); color: var(--text-primary); box-shadow: inset 2px 0 0 var(--accent-primary); }
+.nav-icon { width: 17px; height: 17px; stroke-width: 1.6; }
 .sidebar-footer { padding: 16px; border-top: 1px solid var(--border-subtle); }
-.user-profile { display: flex; align-items: center; gap: 16px; padding: 8px; border-radius: 10px; background: var(--bg-tertiary); }
-.user-avatar { width: 36px; height: 36px; background: var(--accent-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: white; }
-.user-info { flex: 1; display: flex; flex-direction: column; }
-.user-name { font-weight: 500; color: var(--text-primary); font-size: 0.875rem; }
-.user-status { font-size: 0.75rem; color: var(--success); }
-.logout-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease; }
-.logout-btn:hover { background: var(--error); color: white; }
-.logout-btn svg { width: 18px; height: 18px; }
+.data-actions { display: flex; gap: 8px; }
+.data-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; background: transparent; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+.data-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); border-color: var(--border-strong); }
+.data-btn svg { width: 14px; height: 14px; stroke-width: 1.7; }
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); contain: layout style; }
 .content-header { display: flex; align-items: center; justify-content: space-between; padding: 24px 32px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); flex-shrink: 0; transform: translateZ(0); }
-.header-left { display: flex; flex-direction: column; gap: 4px; }
-.page-title { font-size: 1.5rem; font-weight: 700; }
-.page-subtitle { color: var(--text-muted); font-size: 0.875rem; }
-.header-actions { display: flex; align-items: center; gap: 16px; }
+.header-left { display: flex; flex-direction: column; gap: 6px; }
+.page-title { font-size: 1.65rem; font-weight: 600; line-height: 1; }
+.page-title .script { font-size: 1.6rem; margin-left: 2px; }
+.header-actions { display: flex; align-items: center; gap: 12px; }
 .search-box { position: relative; }
-.search-input { width: 220px; padding: 8px 16px; font-size: 0.875rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 10px; outline: none; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
-.search-input:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
-.error-banner { display: flex; align-items: center; gap: 16px; padding: 16px 32px; background: rgba(239, 68, 68, 0.1); border-bottom: 1px solid rgba(239, 68, 68, 0.3); color: var(--error); }
+.search-input { width: 200px; height: 36px; padding: 0 14px; font-family: var(--font-body); font-size: 13px; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); outline: none; transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+.search-input::placeholder { color: var(--text-muted); }
+.search-input:focus { border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
+.error-banner { display: flex; align-items: center; gap: 16px; padding: 14px 32px; background: rgba(209, 104, 104, 0.08); border-bottom: 1px solid rgba(209, 104, 104, 0.3); color: var(--error); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; }
 .accounts-grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, 380px); justify-content: center; gap: 24px; padding: 32px; overflow-y: auto; align-content: start; contain: layout style; will-change: scroll-position; }
 .drag-wrapper { position: relative; transition: transform 0.2s ease, opacity 0.2s ease; }
 .drag-wrapper.drag-source { opacity: 0.4; transform: scale(0.95); }
 .drag-wrapper.drag-over { transform: scale(1.02); }
-.drag-wrapper.drag-over::before { content: ''; position: absolute; inset: -4px; border: 2px dashed var(--accent-primary); border-radius: 18px; pointer-events: none; z-index: 10; }
+.drag-wrapper.drag-over::before { content: ''; position: absolute; inset: -4px; border: 1px dashed var(--accent-primary); border-radius: var(--radius-lg); pointer-events: none; z-index: 10; }
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-muted); }
-.empty-icon { font-size: 4rem; opacity: 0.5; }
+.empty-icon { width: 64px; height: 64px; opacity: 0.4; }
 .empty-state h3 { color: var(--text-secondary); font-size: 1.25rem; }
-
-.btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; }
-.btn-primary { background: var(--accent-gradient); color: white; }
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-danger-outline { background: transparent; color: var(--error); border: 1px solid var(--error); margin-right: 8px; }
-.btn-danger-outline:hover { background: rgba(239, 68, 68, 0.1); }
-.btn-add-account { background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.15)); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }
-.btn-add-account:hover { background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.25)); border-color: #10b981; transform: translateY(-1px); }
-.select-input { padding: 8px 12px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 8px; outline: none; font-size: 0.875rem; cursor: pointer; }
 </style>

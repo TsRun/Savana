@@ -55,6 +55,10 @@ Requires a `.env` file (see `.env.example`):
 - `SECRET_KEY` -- Express session secret
 - `ENV` -- `development` or `production`
 
+## Design system
+
+L'UI suit le système de design documenté dans `docs/DESIGN.md` (tokens dans `src/style.css`). Toute modification visuelle doit le respecter : pas de couleurs/z-index en dur, styles partagés (`.btn`, `.select-input`, modals, toasts) dans `style.css` uniquement, un seul style de focus (`--focus-ring`).
+
 ## Key patterns
 
 - **Rank memory**: If Riot API returns unranked but DB has a previous rank, the old rank is kept and displayed as "Last Season"
