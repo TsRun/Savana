@@ -1,6 +1,6 @@
 import express from 'express';
 import axios from 'axios';
-import { config, getRiotApiKey, setRiotApiKey } from '../config.js';
+import { config, getRiotApiKey, setRiotApiKey, normalizeRiotKey } from '../config.js';
 
 const router = express.Router();
 
@@ -29,8 +29,11 @@ router.get('/riot-key', requireAuth, (req, res) => {
  * Enregistre la clé après l'avoir validée contre l'API Riot
  */
 router.put('/riot-key', requireAuth, async (req, res) => {
-  const key = String(req.body?.key || '').trim();
+  const key = normalizeRiotKey(req.body?.key);
   if (!key) return res.status(400).json({ error: 'Clé requise' });
+  if (!/^RGAPI-[0-9a-f-]{36}$/i.test(key)) {
+    return res.status(400).json({ error: 'Format de clé invalide (attendu : RGAPI-xxxxxxxx-xxxx-…)' });
+  }
 
   // Validation live : endpoint léger, hors rate limiter (appel unique)
   try {

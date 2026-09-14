@@ -65,12 +65,17 @@ const riotKeyPath = path.join(
 
 let riotKeyCache = undefined; // undefined = pas encore lu
 
+// Une clé collée avec ses guillemets ("RGAPI-…") est rejetée en 401 par Riot
+export function normalizeRiotKey(key) {
+  return String(key || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+}
+
 export function getRiotApiKey() {
-  if (process.env.RIOT_API_KEY) return process.env.RIOT_API_KEY;
+  if (process.env.RIOT_API_KEY) return normalizeRiotKey(process.env.RIOT_API_KEY);
   if (riotKeyCache !== undefined) return riotKeyCache;
   try {
     riotKeyCache = fs.existsSync(riotKeyPath)
-      ? fs.readFileSync(riotKeyPath, 'utf8').trim() || null
+      ? normalizeRiotKey(fs.readFileSync(riotKeyPath, 'utf8')) || null
       : null;
   } catch (e) {
     riotKeyCache = null;

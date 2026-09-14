@@ -253,7 +253,9 @@ async function updateSingleSmurf(smurfId) {
     const stats = await calculateStats(currentPuuid, matchIds);
 
     // 3. Prepare Update
-    const updateData = { level };
+    // Même mémoire que pour le rang : un échec API (null) n'efface pas le niveau connu
+    const updateData = {};
+    if (level) updateData.level = level;
 
     // Update Riot ID if changed
     if (currentRiotId && currentRiotId !== smurf.pseudo) {
