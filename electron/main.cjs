@@ -431,8 +431,31 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     await launchLeague();
     console.log('[Load] League launch command sent');
 
+    // Le Riot Client peut ignorer --launch-product (redémarrage après mise à jour,
+    // session encore en validation) et rester seul ouvert : tant que League n'est
+    // pas apparu, on renvoie l'ordre à l'instance déjà lancée.
+    const LEAGUE_TIMEOUT = 90000;
+    const RELAUNCH_EVERY = 15000;
+    const startTime = Date.now();
+    let lastLaunch = startTime;
+    let leagueStarted = false;
+    while (Date.now() - startTime < LEAGUE_TIMEOUT) {
+      if (await isLeagueClientRunning()) {
+        leagueStarted = true;
+        break;
+      }
+      if (Date.now() - lastLaunch >= RELAUNCH_EVERY) {
+        console.log('[Load] League not started yet, re-sending launch command');
+        await launchLeague();
+        lastLaunch = Date.now();
+      }
+      send(`Lancement de League... ${Math.floor((Date.now() - startTime) / 1000)}s`);
+      await sleep(1000);
+    }
+    console.log(leagueStarted ? '[Load] League client detected' : '[Load] Timeout — League not detected');
+
     if (mainWindow) mainWindow.webContents.send('launch-status', { status: 'idle' });
-    return { success: true };
+    return { success: true, leagueStarted };
 
   } catch (error) {
     console.error('[Load] Error:', error.message);
@@ -440,6 +463,15 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     return { success: false, error: error.message };
   }
 });
+
+async function isLeagueClientRunning() {
+  try {
+    const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq LeagueClient.exe" /NH');
+    return /LeagueClient\.exe/i.test(stdout);
+  } catch {
+    return false;
+  }
+}
 
 async function countRiotClientUi() {
   try {

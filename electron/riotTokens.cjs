@@ -42,10 +42,21 @@ async function killRiotClient() {
  * Trouve l'exécutable Riot Client
  */
 function getRiotClientExecutable() {
-  const possiblePaths = [
+  const possiblePaths = [];
+
+  // Chemin réel déclaré par l'installeur Riot (gère les installs hors C:/D:)
+  try {
+    const programData = process.env.ProgramData || 'C:\\ProgramData';
+    const installs = JSON.parse(fs.readFileSync(path.join(programData, 'Riot Games', 'RiotClientInstalls.json'), 'utf8'));
+    for (const p of [installs.rc_live, installs.rc_default]) {
+      if (p) possiblePaths.push(path.normalize(p));
+    }
+  } catch (e) { /* fichier absent : on retombe sur les chemins par défaut */ }
+
+  possiblePaths.push(
     'C:\\Riot Games\\Riot Client\\RiotClientServices.exe',
     'D:\\Riot Games\\Riot Client\\RiotClientServices.exe'
-  ];
+  );
 
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {

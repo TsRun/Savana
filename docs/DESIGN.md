@@ -71,17 +71,18 @@ texte 100 %.
 `--rank-*` inchangés + classes `.text-rank-*` (FriendsView) — exception
 documentée au monochrome, comme les cases d'échiquier chez NotiChess.
 
-## Typographie — le quatuor Savana
+## Typographie — Inter partout
 
-Structure héritée de NotiChess (quatre rôles stricts), mais avec des polices
-propres à Savana — ne pas réutiliser celles de NotiChess.
+Savana utilise sa police d'origine, **Inter** (300–700, italique 400–600),
+pour tous les rôles. Les quatre tokens sont conservés pour garder la
+structure des rôles et pouvoir en changer un seul plus tard.
 
 | Rôle | Police | Token |
 |---|---|---|
-| Display (titres) | **Space Grotesk** (300–700) | `--font-display` |
-| Accent (mot italique des titres) | **Instrument Serif** italique | `--font-script` |
-| Body (corps) | **Instrument Sans** | `--font-body` |
-| Mono (mobilier) | **IBM Plex Mono** | `--font-mono` |
+| Display (titres) | **Inter** (300–700) | `--font-display` |
+| Accent (mot italique des titres) | **Inter** italique | `--font-script` |
+| Body (corps) | **Inter** | `--font-body` |
+| Mono (mobilier) | **Inter** | `--font-mono` |
 
 - **Règle headline** : duo `mot display bold + mot accent serif italique` — ex.
   `My <em class="script">Accounts</em>`. Le mot accent est ~1.08× la taille du
@@ -183,7 +184,7 @@ Titlebar : mono 9.5 px uppercase 0.22 em. Nav sidebar : mono uppercase 11 px
 - ❌ Glows, halos, lifts au hover, scale, fondus lents.
 - ❌ Emoji dans l'UI ; icône devant chaque titre.
 - ❌ `#000` / `#fff` purs.
-- ❌ Inter/Roboto en display — body uniquement.
+- ❌ Police en dur hors tokens `--font-*`.
 - ❌ `confirm()` / `alert()` natifs → ConfirmDialog.
 - ❌ Redéfinir `.btn`, `.select-input`, modals, toasts dans un composant.
 - ❌ z-index en dur, nouveau rayon hors échelle, second style de focus.

@@ -3,7 +3,7 @@
    Adapté du brand spec NotiChess (voir docs/DESIGN.md)
    ===================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500;1,600&display=swap');
 
 :root {
   /* Surfaces — encre navy, jamais de noir pur */
@@ -59,11 +59,11 @@
   --shadow-md: 0 12px 30px -12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 28px 70px -24px rgba(0, 0, 0, 0.6);
 
-  /* Typographie — quatuor NotiChess */
-  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-script: 'Instrument Serif', Georgia, serif;
-  --font-body: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  /* Typographie — Inter partout (police d'origine de Savana) ; les 4 rôles restent des tokens */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-script: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   /* Espacement */
   --space-xs: 4px;

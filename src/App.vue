@@ -1122,7 +1122,11 @@ const handleLoadSession = async (smurf) => {
     const res = await window.electronAPI.loadSession(filename);
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
 
-    showToast(`${name} — League is starting`, 'success');
+    if (res.leagueStarted === false) {
+      showToast(`${name} — Riot Client ouvert, mais League ne s'est pas lancé (session expirée ?)`, 'error');
+    } else {
+      showToast(`${name} — League is starting`, 'success');
+    }
   } catch (e) {
     showToast('Echec: ' + e.message, 'error');
   }
