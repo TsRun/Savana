@@ -71,18 +71,21 @@ texte 100 %.
 `--rank-*` inchangés + classes `.text-rank-*` (FriendsView) — exception
 documentée au monochrome, comme les cases d'échiquier chez NotiChess.
 
-## Typographie — Inter partout
+## Typographie : Geist partout
 
-Savana utilise sa police d'origine, **Inter** (300–700, italique 400–600),
-pour tous les rôles. Les quatre tokens sont conservés pour garder la
-structure des rôles et pouvoir en changer un seul plus tard.
+Savana utilise **Geist** (variable 100 à 900, italique compris), embarquée
+dans l'app via `@fontsource-variable/geist` (importée dans `src/main.js`) :
+aucune requête vers Google Fonts, la police s'affiche aussi hors ligne.
+Les quatre tokens sont conservés pour garder la structure des rôles et
+pouvoir en changer un seul plus tard. Les chiffres sont tabulaires sur tout
+le document (`font-variant-numeric: tabular-nums` sur `body`).
 
 | Rôle | Police | Token |
 |---|---|---|
-| Display (titres) | **Inter** (300–700) | `--font-display` |
-| Accent (mot italique des titres) | **Inter** italique | `--font-script` |
-| Body (corps) | **Inter** | `--font-body` |
-| Mono (mobilier) | **Inter** | `--font-mono` |
+| Display (titres) | **Geist** | `--font-display` |
+| Accent (mot italique des titres) | **Geist** italique | `--font-script` |
+| Body (corps) | **Geist** | `--font-body` |
+| Mono (mobilier) | **Geist** | `--font-mono` |
 
 - **Règle headline** : duo `mot display bold + mot accent serif italique` — ex.
   `My <em class="script">Accounts</em>`. Le mot accent est ~1.08× la taille du
