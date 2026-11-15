@@ -97,8 +97,8 @@
             <button v-if="updateInfo?.status === 'ready'" @click="installUpdate" class="btn btn-primary" title="Redémarrer l'application pour installer la mise à jour">
               Update{{ updateInfo.version ? ' v' + updateInfo.version : '' }}
             </button>
-            <button @click="refreshElo(true)" :disabled="loading" class="btn btn-secondary" title="Actualiser les élos et stats de tous les comptes (Ctrl+R)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; margin-right: 6px;">
+            <button @click="refreshElo(true)" :disabled="loading || refreshing" class="btn btn-secondary" title="Actualiser les élos et stats de tous les comptes (Ctrl+R)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ 'animate-spin': refreshing }" style="width: 14px; height: 14px; margin-right: 6px;">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
               </svg>
@@ -218,6 +218,8 @@ import ConfirmDialog from './components/ConfirmDialog.vue';
 const smurfs = ref([]);
 const friends = ref([]);
 const loading = ref(false);
+// Actualisation des élos / stats en cours (distinct de `loading`, qui bloque aussi Resave All)
+const refreshing = ref(false);
 const loadingFriends = ref(false);
 const error = ref(null);
 // Le rang affiché suit le filtre de queue (Flex sélectionnée => élo Flex)
@@ -265,31 +267,101 @@ watch(statsQueue, async (newQueue) => {
   }
 });
 
-// Calcule les stats manquantes pour la queue sélectionnée, puis re-fetch
-// périodiquement tant que des comptes sont en attente.
-let pendingPollTimer = null;
+// === SUIVI DES ACTUALISATIONS ===
+// Interroge l'état réel côté backend (comptes en file ou en cours, amis en vol)
+// au lieu de deviner une durée, et recharge les listes dès que cet état change.
+const REFRESH_POLL_MS = 2500;
+const REFRESH_MAX_MS = 15 * 60 * 1000;
+let activeSmurfIds = new Set();
+let activeFriendIds = new Set();
+const refreshWaiters = new Set();
+let refreshPolling = false;
+
+const sameIds = (a, b) => a.size === b.size && [...a].every(id => b.has(id));
+
+// null = erreur réseau (on garde l'état connu) ; réponse en erreur (401...) = plus rien à suivre
+const fetchActiveIds = async (path, pick) => {
+  try {
+    const res = await fetch(apiUrl.value + path, { credentials: 'include' });
+    return res.ok ? new Set(pick(await res.json()).map(Number)) : new Set();
+  } catch (e) {
+    return null;
+  }
+};
+
+const pollRefreshOnce = async () => {
+  const startedAt = Date.now();
+  const [smurfIds, friendIds] = await Promise.all([
+    fetchActiveIds('/smurfs/refresh-status', d => [...(d.queued || []), ...(d.current != null ? [d.current] : [])]),
+    fetchActiveIds('/friends/refresh-status', d => d.refreshing || [])
+  ]);
+  if (smurfIds && !sameIds(smurfIds, activeSmurfIds)) {
+    activeSmurfIds = smurfIds;
+    await fetchSmurfs();
+  }
+  if (friendIds && !sameIds(friendIds, activeFriendIds)) {
+    activeFriendIds = friendIds;
+    await fetchFriends({ silent: true });
+  }
+  for (const w of [...refreshWaiters]) {
+    // État lu avant la demande de ce suivi : pas encore représentatif
+    if (w.addedAt > startedAt) continue;
+    const timedOut = Date.now() > w.deadline;
+    if (timedOut || !w.isBusy()) {
+      refreshWaiters.delete(w);
+      w.resolve({ timedOut });
+    }
+  }
+};
+
+const runRefreshPoll = async () => {
+  if (refreshPolling) return;
+  refreshPolling = true;
+  const startedAt = Date.now();
+  try {
+    while (true) {
+      await pollRefreshOnce();
+      const idle = activeSmurfIds.size === 0 && activeFriendIds.size === 0;
+      // Chaque attente a sa propre échéance : la boucle finit toujours
+      if (refreshWaiters.size === 0 && (idle || Date.now() - startedAt > REFRESH_MAX_MS)) break;
+      await new Promise(r => setTimeout(r, REFRESH_POLL_MS));
+    }
+  } finally {
+    refreshPolling = false;
+  }
+};
+
+// Résout { timedOut } quand les comptes / amis donnés ne sont plus en cours
+// (sans liste : quand plus aucun compte n'est en cours).
+const waitForRefresh = ({ smurfIds = null, friendIds = null } = {}) => new Promise(resolve => {
+  const ids = (friendIds || smurfIds || []).map(Number);
+  const isBusy = friendIds ? () => ids.some(id => activeFriendIds.has(id))
+    : smurfIds ? () => ids.some(id => activeSmurfIds.has(id))
+    : () => activeSmurfIds.size > 0;
+  const now = Date.now();
+  refreshWaiters.add({ isBusy, addedAt: now, deadline: now + REFRESH_MAX_MS, resolve });
+  runRefreshPoll();
+});
+
+// Calcule les stats manquantes pour la queue sélectionnée et suit leur calcul
 const refreshPendingStats = async (queue) => {
   const pending = smurfs.value.filter(s => s.StatsState === 'pending');
   if (pending.length === 0) return;
 
   showToast(`Calcul des stats ${queue} pour ${pending.length} compte(s)...`, 'info');
   await Promise.all(pending.map(s =>
-    fetch(`${apiUrl.value}/smurfs/${s.id}/refresh`, { method: 'POST', credentials: 'include' })
-      .catch(() => {})
+    fetch(`${apiUrl.value}/smurfs/${s.id}/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue })
+    }).catch(() => {})
   ));
 
-  clearInterval(pendingPollTimer);
-  let attempts = 0;
-  pendingPollTimer = setInterval(async () => {
-    attempts++;
-    await fetchSmurfs();
-    const stillPending = smurfs.value.some(s => s.StatsState === 'pending');
-    if (!stillPending || attempts >= 30) {
-      clearInterval(pendingPollTimer);
-      pendingPollTimer = null;
-      if (!stillPending) showToast('Stats à jour', 'success');
-    }
-  }, 10000);
+  const { timedOut } = await waitForRefresh({ smurfIds: pending.map(s => s.id) });
+  await fetchSmurfs();
+  const stillPending = smurfs.value.some(s => s.StatsState === 'pending');
+  if (!timedOut && !stillPending && statsQueue.value === queue) showToast('Stats à jour', 'success');
 };
 
 // Confirm dialog state
@@ -748,8 +820,9 @@ const showFriendsTab = () => {
   fetchFriends();
 };
 
-const fetchFriends = async () => {
-  loadingFriends.value = true;
+// silent : rechargement en arrière-plan, sans afficher la ligne « Loading... »
+const fetchFriends = async ({ silent = false } = {}) => {
+  if (!silent) loadingFriends.value = true;
   try {
     const res = await fetch(apiUrl.value + '/friends', { credentials: 'include' });
     if (res.ok) {
@@ -787,18 +860,16 @@ const handleRefreshFriend = async (payload) => {
   
   showToast(`Refreshing friend stats (${queue})...`, 'info');
   try {
-    await fetch(`${apiUrl.value}/friends/${friendId}/refresh`, {
+    const res = await fetch(`${apiUrl.value}/friends/${friendId}/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ queue })
     });
-    // Le calcul prend ~30s (rate limit API) : re-fetch au début puis à la fin
-    setTimeout(() => fetchFriends(), 3000);
-    setTimeout(() => {
-      fetchFriends();
-      showToast('Friend stats updated', 'success');
-    }, 35000);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { timedOut } = await waitForRefresh({ friendIds: [friendId] });
+    await fetchFriends({ silent: true });
+    if (!timedOut) showToast('Friend stats updated', 'success');
   } catch (e) {
     showToast('Failed to refresh friend', 'error');
   }
@@ -806,22 +877,20 @@ const handleRefreshFriend = async (payload) => {
 
 const handleRefreshSmurf = async (payload) => {
   const smurfId = typeof payload === 'object' ? payload.id : payload;
-  const queue = typeof payload === 'object' ? payload.queue : 'soloq';
+  const queue = typeof payload === 'object' ? payload.queue : statsQueue.value;
 
   showToast(`Refreshing smurf stats (${queue})...`, 'info');
   try {
-    // Note: Assuming /smurfs/:id/refresh also accepts body now.
-    // I need to update smurfs.js route next.
-    await fetch(`${apiUrl.value}/smurfs/${smurfId}/refresh`, { 
-      method: 'POST', 
+    const res = await fetch(`${apiUrl.value}/smurfs/${smurfId}/refresh`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ queue })
     });
-    setTimeout(() => {
-      fetchSmurfs();
-      showToast('Smurf stats updated', 'success');
-    }, 3000);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { timedOut } = await waitForRefresh({ smurfIds: [smurfId] });
+    await fetchSmurfs();
+    if (!timedOut) showToast('Smurf stats updated', 'success');
   } catch (e) {
     showToast('Failed to refresh smurf', 'error');
   }
@@ -829,13 +898,23 @@ const handleRefreshSmurf = async (payload) => {
 
 
 const refreshElo = async (force = false) => {
-  loading.value = true;
   error.value = null;
-  showToast(force ? 'Mise à jour complète...' : 'Refreshing...', 'info');
+  // Une actualisation déjà suivie couvre aussi cette demande (le backend dédoublonne)
+  const alreadyTracking = refreshing.value;
+  refreshing.value = true;
+  if (!alreadyTracking) showToast(force ? 'Mise à jour complète...' : 'Refreshing...', 'info');
   try {
-    await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value, force }) });
-    setTimeout(async () => { await fetchSmurfs(); loading.value = false; showToast('Done!', 'success'); }, 3000);
-  } catch (e) { error.value = e.message; loading.value = false; }
+    const res = await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value, force }) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (alreadyTracking) return;
+    const { timedOut } = await waitForRefresh();
+    await fetchSmurfs();
+    showToast(timedOut ? 'Actualisation toujours en cours...' : 'Done!', timedOut ? 'info' : 'success');
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    if (!alreadyTracking) refreshing.value = false;
+  }
 };
 
 const resetClient = async () => {
@@ -1266,7 +1345,7 @@ const tourSeen = computed(() => {
 const handleGlobalKeydown = (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
     e.preventDefault();
-    if (!loading.value && !confirmDialog.value.isOpen) refreshElo(true);
+    if (!loading.value && !refreshing.value && !confirmDialog.value.isOpen) refreshElo(true);
   }
 };
 

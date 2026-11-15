@@ -81,11 +81,34 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/friends/refresh-status
+ * Amis dont une actualisation est en cours (suivi côté UI)
+ */
+router.get('/refresh-status', requireAuth, (req, res) => {
+    const owned = db.getUserFriends(req.session.user_id).map(f => f.id);
+    res.json({ refreshing: owned.filter(id => inFlight.has(Number(id))) });
+});
+
+// Actualisations en vol par ami (compteur : plusieurs queues peuvent se chevaucher)
+const inFlight = new Map();
+
+/**
  * Helper to refresh stats (Rank + Main Role + Main Champs)
  * Les stats sont stockées par queue dans stats_by_queue pour ne pas
  * écraser celles des autres queues.
  */
 async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30', existingStatsJson = null) {
+    const key = Number(friendId);
+    inFlight.set(key, (inFlight.get(key) || 0) + 1);
+    try {
+        await doRefreshFriendStats(friendId, puuid, queue, period, existingStatsJson);
+    } finally {
+        const left = inFlight.get(key) - 1;
+        if (left > 0) inFlight.set(key, left); else inFlight.delete(key);
+    }
+}
+
+async function doRefreshFriendStats(friendId, puuid, queue, period, existingStatsJson) {
     console.log(`[FRIENDS] Refreshing ${friendId} (Queue: ${queue})...`);
     try {
         // 1. Rank (Always fetch rank data regardless of queue, used for badge)

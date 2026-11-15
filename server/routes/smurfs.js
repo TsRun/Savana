@@ -14,6 +14,18 @@ function requireAuth(req, res, next) {
   next();
 }
 
+const VALID_QUEUES = ['soloq', 'flex', 'all'];
+const VALID_PERIODS = ['30', 'season'];
+
+// Filtres de stats d'une demande : ceux du corps s'ils sont valides, sinon les préférences
+function resolveFilters(userId, body = {}) {
+  const prefs = db.getUserPreferences(userId) || {};
+  return {
+    queue: VALID_QUEUES.includes(body.queue) ? body.queue : (prefs.stats_queue || 'soloq'),
+    period: VALID_PERIODS.includes(String(body.period)) ? String(body.period) : (prefs.stats_period || '30')
+  };
+}
+
 /**
  * POST /api/smurfs/reset-all
  * Reset all rank and stats data (admin/debug endpoint)
@@ -39,6 +51,7 @@ router.get('/', requireAuth, (req, res) => {
   const queue = prefs?.stats_queue || 'soloq';
 
   const dynamicStatsKey = `stats_${period}_${queue}`;
+  const syncingIds = scheduler.activeIds();
 
   const formattedSmurfs = smurfs.map(smurf => {
     // Stats strictement pour la combinaison (période, queue) demandée.
@@ -78,7 +91,7 @@ router.get('/', requireAuth, (req, res) => {
       id: smurf.id,
       SessionKey: smurf.session_key,
       sort_order: smurf.sort_order,
-      is_syncing: false
+      is_syncing: syncingIds.has(smurf.id)
     };
   });
 
@@ -123,7 +136,7 @@ router.post('/', requireAuth, async (req, res) => {
   const smurfId = db.addSmurf(userId, puuid, pseudo, username || '', password || '');
 
   // Prioritize update
-  scheduler.enqueue(smurfId);
+  scheduler.enqueue(smurfId, resolveFilters(userId));
 
   const smurf = db.getSmurfById(smurfId);
   res.status(201).json({ id: smurf.id, Pseudo: smurf.pseudo, SessionKey: smurf.session_key });
@@ -196,25 +209,36 @@ router.delete('/:id', requireAuth, (req, res) => {
 
 
 // === WORKER / SCHEDULER ===
-// Queue simple pour traiter les smurfs un par un
+// Queue simple pour traiter les smurfs un par un. Chaque élément garde la queue
+// et la période captées à la mise en file (les préférences peuvent changer entre-temps).
 const scheduler = {
-  queue: [],
+  queue: [],       // { id, queue, period }
+  current: null,   // élément en cours de traitement
   processing: false,
-  enqueue(smurfId) {
-    if (!this.queue.includes(smurfId)) {
-      this.queue.push(smurfId);
+  enqueue(smurfId, { queue, period }) {
+    const already = this.queue.some(j => j.id === smurfId && j.queue === queue && j.period === period);
+    if (!already) {
+      this.queue.push({ id: smurfId, queue, period });
       this.process();
     }
+  },
+  // Comptes en file ou en cours de mise à jour
+  activeIds() {
+    const ids = new Set(this.queue.map(j => j.id));
+    if (this.current) ids.add(this.current.id);
+    return ids;
   },
   async process() {
     if (this.processing || this.queue.length === 0) return;
     this.processing = true;
 
     while (this.queue.length > 0) {
-      const id = this.queue.shift();
+      const job = this.queue.shift();
+      this.current = job;
       try {
-        await updateSingleSmurf(id);
+        await updateSingleSmurf(job.id, job);
       } catch (e) { console.error(e); }
+      this.current = null;
     }
 
     this.processing = false;
@@ -224,7 +248,7 @@ const scheduler = {
 /**
  * Mise à jour d'un seul smurf
  */
-async function updateSingleSmurf(smurfId) {
+async function updateSingleSmurf(smurfId, { queue, period }) {
   const smurf = db.getSmurfById(smurfId);
   if (!smurf) return;
 
@@ -274,11 +298,7 @@ async function updateSingleSmurf(smurfId) {
     const level = levelResult.level;
     const { soloq, flex } = formatRank(rankData);
 
-    // 2. Stats (Dynamic based on preferences)
-    const prefs = db.getUserPreferences(smurf.user_id);
-    const queue = prefs.stats_queue || 'soloq';
-    const period = prefs.stats_period || '30';
-
+    // 2. Stats pour la queue / période demandées à la mise en file
     // Une erreur API (clé expirée, 429...) ne doit pas passer pour « 0 partie »
     let stats = null;
     let statsFailed = false;
@@ -360,9 +380,10 @@ export async function refreshSmurfs(req, res) {
   const userId = req.session?.user_id;
   if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
-  const { queue = 'soloq', period = '30', force = false } = req.body;
+  const { force = false } = req.body || {};
+  const filters = resolveFilters(userId, req.body || {});
 
-  db.updateUserPreferences(userId, period, queue);
+  db.updateUserPreferences(userId, filters.period, filters.queue);
 
   // Ajouter tous les smurfs à la queue du scheduler
   const smurfs = db.getUserSmurfs(userId);
@@ -371,7 +392,7 @@ export async function refreshSmurfs(req, res) {
 
   for (const s of smurfs) {
     if (force || !s.last_updated || (now - new Date(s.last_updated).getTime() > REFRESH_COOLDOWN)) {
-      scheduler.enqueue(s.id);
+      scheduler.enqueue(s.id, filters);
       queuedCount++;
     }
   }
@@ -379,7 +400,7 @@ export async function refreshSmurfs(req, res) {
   res.status(202).json({
     status: 'Background update started',
     queued: queuedCount,
-    filters: { queue, period }
+    filters
   });
 }
 
@@ -393,8 +414,19 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'Smurf non trouvé' });
   }
 
-  scheduler.enqueue(smurfId);
+  scheduler.enqueue(smurfId, resolveFilters(req.session.user_id, req.body || {}));
   res.status(202).json({ status: 'Refresh queued' });
+});
+
+/**
+ * GET /api/smurfs/refresh-status
+ * État réel des mises à jour : comptes en file et compte en cours (suivi côté UI)
+ */
+router.get('/refresh-status', requireAuth, (req, res) => {
+  const owned = new Set(db.getUserSmurfs(req.session.user_id).map(s => s.id));
+  const queued = [...new Set(scheduler.queue.map(j => j.id))].filter(id => owned.has(id));
+  const current = scheduler.current && owned.has(scheduler.current.id) ? scheduler.current.id : null;
+  res.json({ queued, current });
 });
 
 /**
