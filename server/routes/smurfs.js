@@ -55,7 +55,8 @@ router.get('/', requireAuth, (req, res) => {
       PUUID: smurf.puuid,
       Pseudo: smurf.pseudo,
       UserName: smurf.username,
-      Password: smurf.password,
+      // Le mot de passe n'est jamais envoyé avec la liste : voir GET /:id/credentials
+      HasPassword: !!smurf.password,
       Elo_SoloQ: smurf.soloq_tier ? {
         tier: smurf.soloq_tier,
         rank: smurf.soloq_rank,
@@ -130,7 +131,22 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/smurfs/:id/credentials
+ * Identifiants déchiffrés d'un seul compte, chargés à la demande (copie, édition).
+ */
+router.get('/:id/credentials', requireAuth, (req, res) => {
+  const userId = req.session.user_id;
+  const smurf = db.getSmurfById(parseInt(req.params.id));
+  if (!smurf || smurf.user_id !== userId) {
+    return res.status(404).json({ error: 'Smurf non trouvé' });
+  }
+  res.set('Cache-Control', 'no-store');
+  res.json({ username: smurf.username || '', password: smurf.password || '' });
+});
+
+/**
  * PUT /api/smurfs/:id/credentials
+ * Un champ absent du corps est conservé tel quel (mot de passe non chargé côté UI).
  */
 router.put('/:id/credentials', requireAuth, (req, res) => {
   const userId = req.session.user_id;
@@ -142,7 +158,11 @@ router.put('/:id/credentials', requireAuth, (req, res) => {
     return res.status(404).json({ error: 'Smurf non trouvé' });
   }
 
-  db.updateSmurfCredentials(smurfId, username || '', password || '');
+  db.updateSmurfCredentials(
+    smurfId,
+    username === undefined ? (smurf.username || '') : (username || ''),
+    password === undefined ? (smurf.password || '') : (password || '')
+  );
   res.json({ success: true });
 });
 

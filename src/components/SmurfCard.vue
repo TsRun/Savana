@@ -119,7 +119,7 @@
           </svg>
           <span class="btn-label">User</span>
         </button>
-        <button v-if="smurf.Password" @click="$emit('copy', smurf.Password, 'Password')" class="action-btn" title="Copy password">
+        <button v-if="smurf.HasPassword" @click="$emit('copy-password', smurf)" class="action-btn" title="Copy password">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
             <path d="M7 11V7a5 5 0 0110 0v4"/>
@@ -237,24 +237,42 @@ const props = defineProps({
   flippedId: {
     type: [String, Number],
     default: null
+  },
+  // (id) => Promise<{ username, password }> : identifiants chargés à la demande
+  loadCredentials: {
+    type: Function,
+    default: null
   }
 });
 
-const emit = defineEmits(['copy', 'delete', 'save-session', 'load-session', 'update-credentials', 'disconnect-session', 'flip', 'flip-back']);
+const emit = defineEmits(['copy', 'copy-password', 'delete', 'save-session', 'load-session', 'update-credentials', 'disconnect-session', 'flip', 'flip-back']);
 
 const isHovered = ref(false);
 const showPassword = ref(false);
 const editSaving = ref(false);
 const editForm = ref({ username: '', password: '', notes: '' });
+// Faux tant que le mot de passe n'a pas pu être chargé : on ne l'envoie alors pas à la sauvegarde
+const passwordLoaded = ref(false);
 
 const isFlipped = computed(() => props.flippedId === (props.smurf.id || props.smurf.PUUID));
 
 const flip = () => {
   editForm.value.username = props.smurf.UserName || '';
-  editForm.value.password = props.smurf.Password || '';
+  editForm.value.password = '';
   editForm.value.notes = props.smurf.Notes || '';
+  passwordLoaded.value = false;
   showPassword.value = false;
   emit('flip', props.smurf.id || props.smurf.PUUID);
+
+  if (props.loadCredentials && props.smurf.id) {
+    const id = props.smurf.id;
+    props.loadCredentials(id).then(({ password }) => {
+      if (props.smurf.id !== id || !isFlipped.value) return;
+      // Ne pas écraser ce que l'utilisateur a déjà commencé à taper
+      if (!editForm.value.password) editForm.value.password = password || '';
+      passwordLoaded.value = true;
+    }).catch(() => { /* champ laissé vide, mot de passe conservé à la sauvegarde */ });
+  }
 };
 
 const flipBack = () => {
@@ -263,10 +281,12 @@ const flipBack = () => {
 
 const saveAndFlip = () => {
   editSaving.value = true;
+  const password = editForm.value.password.trim();
   emit('update-credentials', {
     id: props.smurf.id,
     username: editForm.value.username.trim(),
-    password: editForm.value.password.trim(),
+    // Mot de passe non chargé et laissé vide : absent du payload, donc conservé côté serveur
+    password: (passwordLoaded.value || password) ? password : undefined,
     notes: editForm.value.notes.trim()
   });
   editSaving.value = false;

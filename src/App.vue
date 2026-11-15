@@ -134,7 +134,9 @@
               :displayRank="displayRank"
               :queueFilter="statsQueue"
               :flippedId="flippedCardId"
+              :loadCredentials="fetchCredentials"
               @copy="handleCopy"
+              @copy-password="handleCopyPassword"
               @delete="deleteSmurf"
               @save-session="handleSaveSession"
               @load-session="handleLoadSession"
@@ -918,6 +920,12 @@ const saveAllSessions = async () => {
           if (res.loggedIn) triggerAutoConfirm();
         });
 
+        // Identifiants actuels, chargés à la demande pour préremplir le dialogue
+        let current = null;
+        try { current = await fetchCredentials(smurf.id); } catch (e) { console.error('Credential load error:', e); }
+        const initialUser = current ? current.username : (smurf.UserName || '');
+        const initialPass = current ? current.password : '';
+
         // Show dialog — user logs in manually while filling credentials
         const { action, data } = await showConfirm({
           title: `${label}`,
@@ -927,8 +935,8 @@ const saveAllSessions = async () => {
           thirdText: 'Cancel All',
           locked: true,
           inputs: [
-            { key: 'username', label: 'Username', placeholder: 'Riot username', value: smurf.UserName || '' },
-            { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: smurf.Password || '' }
+            { key: 'username', label: 'Username', placeholder: 'Riot username', value: initialUser },
+            { key: 'password', label: 'Password', type: 'password', placeholder: 'Password', value: initialPass }
           ],
           type: 'info'
         });
@@ -937,16 +945,19 @@ const saveAllSessions = async () => {
         // Save credentials if changed
         const newUser = (data?.username || '').trim();
         const newPass = (data?.password || '').trim();
-        if (newUser !== (smurf.UserName || '') || newPass !== (smurf.Password || '')) {
+        if (newUser !== initialUser || newPass !== initialPass) {
+          // Mot de passe non chargé et laissé vide : on ne l'écrase pas
+          const body = { username: newUser };
+          if (current || newPass) body.password = newPass;
           try {
             await fetch(`${apiUrl.value}/smurfs/${smurf.id}/credentials`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
-              body: JSON.stringify({ username: newUser, password: newPass })
+              body: JSON.stringify(body)
             });
             smurf.UserName = newUser;
-            smurf.Password = newPass;
+            if ('password' in body) smurf.HasPassword = !!newPass;
           } catch (e) { console.error('Credential save error:', e); }
         }
 
@@ -1029,6 +1040,22 @@ const handleCopy = async (text, type) => {
   } catch (e) {
     console.error('Copy error:', e);
     showToast('Failed to copy ' + type, 'error');
+  }
+};
+
+// Identifiants d'un compte, chargés à la demande (jamais envoyés avec la liste)
+const fetchCredentials = async (id) => {
+  const res = await fetch(`${apiUrl.value}/smurfs/${id}/credentials`, { credentials: 'include' });
+  if (!res.ok) throw new Error('Identifiants indisponibles');
+  return res.json();
+};
+
+const handleCopyPassword = async (smurf) => {
+  try {
+    const { password } = await fetchCredentials(smurf.id);
+    await handleCopy(password, 'Password');
+  } catch (e) {
+    showToast('Failed to copy Password', 'error');
   }
 };
 
