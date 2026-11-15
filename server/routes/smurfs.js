@@ -279,8 +279,16 @@ async function updateSingleSmurf(smurfId) {
     const queue = prefs.stats_queue || 'soloq';
     const period = prefs.stats_period || '30';
 
-    const matchIds = await getMatchIds(currentPuuid, queue, period);
-    const stats = await calculateStats(currentPuuid, matchIds);
+    // Une erreur API (clé expirée, 429...) ne doit pas passer pour « 0 partie »
+    let stats = null;
+    let statsFailed = false;
+    try {
+      const matchIds = await getMatchIds(currentPuuid, queue, period);
+      stats = await calculateStats(currentPuuid, matchIds);
+    } catch (e) {
+      statsFailed = true;
+      console.error(`   [KEEP] Stats ${queue}/${period} non mises à jour : ${e.message}`);
+    }
 
     // 3. Prepare Update
     // Même mémoire que pour le rang : un échec API (null) n'efface pas le niveau connu
@@ -302,9 +310,12 @@ async function updateSingleSmurf(smurfId) {
       statsJson = smurf.stats_json ? JSON.parse(smurf.stats_json) : {};
     } catch (e) { }
 
-    const statsKey = `stats_${period}_${queue}`;
-    statsJson[statsKey] = stats;
-    updateData.stats_json = statsJson;
+    // Même mémoire que pour le rang : en cas d'échec, les stats précédentes sont gardées
+    if (!statsFailed) {
+      const statsKey = `stats_${period}_${queue}`;
+      statsJson[statsKey] = stats;
+      updateData.stats_json = statsJson;
+    }
 
     // LOGIQUE DE MEMOIRE DE RANG (Keep existing rank if new is null)
     if (soloq.tier) {

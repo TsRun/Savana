@@ -57,9 +57,28 @@ class RateLimiter {
 // 1.25s entre chaque requête globalement
 const limiter = new RateLimiter(1250);
 
+// 429 : on attend le Retry-After puis on retente, dans le créneau du limiteur
+// (toute la file est en pause, la clé étant limitée globalement).
+const MAX_429_RETRIES = 3;
+const DEFAULT_RETRY_AFTER_S = 10;
+const MAX_RETRY_AFTER_S = 120;
+
+async function requestWithRetry(url, options) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await axios.get(url, { ...options, headers: getHeaders() });
+    } catch (err) {
+      if (err.response?.status !== 429 || attempt >= MAX_429_RETRIES) throw err;
+      const header = Number(err.response.headers?.['retry-after']);
+      const waitS = Math.min(Number.isFinite(header) && header > 0 ? header : DEFAULT_RETRY_AFTER_S, MAX_RETRY_AFTER_S);
+      console.warn(`   [API] 429 rate limit, nouvel essai dans ${waitS}s (${attempt + 1}/${MAX_429_RETRIES})`);
+      await new Promise(r => setTimeout(r, waitS * 1000));
+    }
+  }
+}
+
 async function safeRequest(url, options = {}) {
-  // Enqueue the request
-  return limiter.add(() => axios.get(url, { ...options, headers: getHeaders() }));
+  return limiter.add(() => requestWithRetry(url, options));
 }
 
 // Cache pour les PUUIDs
@@ -166,6 +185,7 @@ export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
     params.queue = QUEUE_IDS[queueType];
   }
 
+  // Une erreur API est propagée : [] signifie uniquement « aucune partie »
   try {
     const response = await safeRequest(url, { params });
     const matches = response.data || [];
@@ -173,7 +193,7 @@ export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
     return matches;
   } catch (err) {
     console.error(`   [API] Erreur MatchIds: ${err.message}`);
-    return [];
+    throw err;
   }
 }
 
@@ -198,13 +218,21 @@ async function getMatchDetailsBatch(matchIds) {
   return results;
 }
 
+/**
+ * Stats sur les matchs donnés. Renvoie null si aucune partie comptée (vrai « 0 partie »).
+ * Lève une erreur si plus de la moitié des détails de match n'a pas pu être chargée :
+ * l'appelant garde alors les stats précédentes au lieu de les écraser.
+ */
 export async function calculateStats(puuid, matchIds) {
   if (!matchIds || matchIds.length === 0) return null;
 
   console.log(`   [API] Analyse de ${matchIds.length} matchs... (Est: ${matchIds.length * 1.25}s)`);
 
   const matches = await getMatchDetailsBatch(matchIds);
-  if (matches.length === 0) return null;
+  const failed = matchIds.length - matches.length;
+  if (failed * 2 > matchIds.length) {
+    throw new Error(`Détails de match indisponibles (${failed}/${matchIds.length} en échec)`);
+  }
 
   let totalKills = 0, totalDeaths = 0, totalAssists = 0, wins = 0, gamesCount = 0;
   const roles = {};

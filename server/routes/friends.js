@@ -92,20 +92,27 @@ async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30
         const rankData = await getRankData(puuid);
         const { soloq, flex } = formatRank(rankData);
 
-        // 2. Stats (Filtered by Queue)
-        const matchIds = await getMatchIds(puuid, queue, period);
-        const stats_calc = await calculateStats(puuid, matchIds);
-
+        // 2. Stats (Filtered by Queue). Une erreur API garde les stats précédentes.
         const prev = existingStatsJson || {};
         const statsByQueue = { ...(prev.stats_by_queue || {}) };
-        statsByQueue[queue] = stats_calc;
+        let stats_calc = null;
+        let statsFailed = false;
+        try {
+            const matchIds = await getMatchIds(puuid, queue, period);
+            stats_calc = await calculateStats(puuid, matchIds);
+            statsByQueue[queue] = stats_calc;
+        } catch (e) {
+            statsFailed = true;
+            console.error(`[FRIENDS] Stats ${queue} non mises à jour pour ${friendId} : ${e.message}`);
+        }
 
         const stats = {
             soloq,
             flex,
-            stats: stats_calc,               // dernière queue rafraîchie (compat)
+            // dernière queue rafraîchie (compat)
+            stats: statsFailed ? (prev.stats ?? null) : stats_calc,
             stats_by_queue: statsByQueue,    // stats par queue
-            filter: { queue, period }
+            filter: statsFailed ? (prev.filter ?? { queue, period }) : { queue, period }
         };
 
         db.updateFriendData(friendId, stats);
