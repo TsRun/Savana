@@ -124,6 +124,44 @@ function createWindow() {
   });
 }
 
+// Clé de chiffrement de la base, scellée par le coffre Windows (DPAPI).
+// Migration : une ancienne `.savana_key` en clair est scellée puis supprimée,
+// seulement après avoir vérifié que la version scellée se relit bien.
+// Renvoie la clé hex, ou null pour laisser le backend utiliser le fichier en clair.
+function resolveDbKey() {
+  if (!canUseSafeStorage()) return null;
+  const dir = app.getPath('userData');
+  const plainPath = path.join(dir, '.savana_key');
+  const sealedPath = path.join(dir, '.savana_key.sealed');
+  const isKey = (hex) => /^[0-9a-f]{64}$/i.test(hex || '');
+  try {
+    const plain = fs.existsSync(plainPath) ? fs.readFileSync(plainPath, 'utf8').trim() : null;
+
+    if (fs.existsSync(sealedPath)) {
+      const sealed = safeStorage.decryptString(fs.readFileSync(sealedPath)).trim();
+      if (!isKey(sealed)) throw new Error('clé scellée invalide');
+      if (plain === sealed) fs.rmSync(plainPath, { force: true });
+      else if (plain) console.warn('[Key] .savana_key différente de la clé scellée : conservée pour récupération manuelle');
+      return sealed;
+    }
+
+    const key = plain || require('crypto').randomBytes(32).toString('hex');
+    if (!isKey(key)) throw new Error('.savana_key invalide');
+    const tmp = sealedPath + '.tmp';
+    fs.writeFileSync(tmp, safeStorage.encryptString(key));
+    fs.renameSync(tmp, sealedPath);
+    if (safeStorage.decryptString(fs.readFileSync(sealedPath)).trim() !== key) {
+      throw new Error('vérification de la clé scellée échouée');
+    }
+    if (plain) fs.rmSync(plainPath, { force: true });
+    console.log('[Key] Clé de chiffrement scellée (DPAPI)');
+    return key;
+  } catch (e) {
+    console.error('[Key] Clé scellée indisponible, repli sur .savana_key:', e.message);
+    return null;
+  }
+}
+
 function startBackendServer() {
   const isDev = !app.isPackaged;
   console.log('[Backend] Mode:', isDev ? 'Development' : 'Production (Fork)');
@@ -136,8 +174,12 @@ function startBackendServer() {
   console.log('[Backend] Script:', serverPath);
 
   try {
+    const env = { ...process.env, ELECTRON_MODE: 'true', USER_DATA_PATH: app.getPath('userData') };
+    const dbKey = resolveDbKey();
+    if (dbKey) env.SAVANA_DB_KEY = dbKey;
+
     serverProcess = require('child_process').fork(serverPath, [], {
-      env: { ...process.env, ELECTRON_MODE: 'true', USER_DATA_PATH: app.getPath('userData') },
+      env,
       cwd: isDev ? path.join(__dirname, '..') : path.join(process.resourcesPath, 'backend'),
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] // IPC pour process.msg
     });
@@ -364,7 +406,7 @@ function getSessionDir(filename, { create = false } = {}) {
   return sessionDir;
 }
 
-function canSealSessions() {
+function canUseSafeStorage() {
   try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
 }
 
@@ -375,7 +417,7 @@ function writeSessionFile(sessionDir, content, mtime = null) {
   const plainPath = path.join(sessionDir, SESSION_FILE);
   const encPath = path.join(sessionDir, SESSION_FILE_ENC);
   let written;
-  if (canSealSessions()) {
+  if (canUseSafeStorage()) {
     const tmp = encPath + '.tmp';
     fs.writeFileSync(tmp, safeStorage.encryptString(content.toString('utf8')));
     fs.renameSync(tmp, encPath);
@@ -434,7 +476,7 @@ function injectSession(content, possiblePaths, logPrefix) {
 
 // Chiffre au démarrage les sessions encore stockées en clair (versions précédentes).
 function sealLegacySessions() {
-  if (!canSealSessions()) return;
+  if (!canUseSafeStorage()) return;
   const root = sessionsRoot();
   if (!fs.existsSync(root)) return;
   for (const name of fs.readdirSync(root)) {

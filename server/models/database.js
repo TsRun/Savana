@@ -21,10 +21,19 @@ function newSessionKey() {
  * Sauvegarde la base de données sur le disque
  */
 function saveDatabase() {
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
+  if (!db) return;
+  const buffer = Buffer.from(db.export());
+  // Écriture atomique : fichier temporaire puis renommage, pour qu'un crash
+  // pendant l'écriture ne laisse jamais un smurfs.db tronqué.
+  const tmpPath = config.dbPath + '.tmp';
+  try {
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, config.dbPath);
+  } catch (err) {
+    // Windows : le renommage échoue si un autre processus (antivirus) tient le fichier
+    console.warn('[DB] Écriture atomique impossible, écriture directe:', err.message);
     fs.writeFileSync(config.dbPath, buffer);
+    try { fs.rmSync(tmpPath, { force: true }); } catch (e) { }
   }
 }
 
@@ -94,15 +103,12 @@ export async function initDb() {
       
       -- Autre
       level INTEGER DEFAULT 0,
-      
-      -- Cookies Riot pour auto-login
-      riot_tokens TEXT DEFAULT NULL,
-      
-      -- Stats pré-calculées pour chaque combinaison
-      stats_30_ranked TEXT,
-      stats_30_all TEXT,
-      stats_season_ranked TEXT,
-      stats_season_all TEXT,
+
+      -- Stats par combinaison (période, queue) : { "stats_30_soloq": {...}, ... }
+      stats_json TEXT DEFAULT NULL,
+      sort_order INTEGER DEFAULT NULL,
+      -- Nom du dossier de session Riot du compte (sessions/<session_key>/)
+      session_key TEXT DEFAULT NULL,
       last_updated TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -137,20 +143,6 @@ export async function initDb() {
   db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_user ON smurfs(user_id)');
   db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_puuid ON smurfs(puuid)');
 
-  // Migration: Ajouter la colonne riot_tokens si elle n'existe pas
-  try {
-    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
-    if (tableInfo.length > 0) {
-      const columns = tableInfo[0].values.map(row => row[1]);
-      if (!columns.includes('riot_tokens')) {
-        db.run('ALTER TABLE smurfs ADD COLUMN riot_tokens TEXT DEFAULT NULL');
-        console.log('[DB] Migration: colonne riot_tokens ajoutee');
-      }
-    }
-  } catch (err) {
-    console.error('[DB] Erreur migration riot_tokens:', err.message);
-  }
-
   // Migration: Ajouter la colonne tour_completed si elle n'existe pas
   try {
     const tableInfo = db.exec("PRAGMA table_info(user_preferences)");
@@ -177,20 +169,6 @@ export async function initDb() {
     }
   } catch (err) {
     console.error('[DB] Erreur migration stats_json:', err.message);
-  }
-
-  // Migration: Ajouter la colonne session_saved_at pour tracker l'âge des sessions
-  try {
-    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
-    if (tableInfo.length > 0) {
-      const columns = tableInfo[0].values.map(row => row[1]);
-      if (!columns.includes('session_saved_at')) {
-        db.run('ALTER TABLE smurfs ADD COLUMN session_saved_at TIMESTAMP DEFAULT NULL');
-        console.log('[DB] Migration: colonne session_saved_at ajoutee');
-      }
-    }
-  } catch (err) {
-    console.error('[DB] Erreur migration session_saved_at:', err.message);
   }
 
   // Migration: Update old 'ranked' preference to 'soloq'
@@ -232,20 +210,20 @@ export async function initDb() {
     console.error('[DB] Erreur migration session_key:', err.message);
   }
 
-  // Migration: chiffrer les secrets existants stockés en clair (username, password, riot_tokens)
+  // Migration: chiffrer les secrets existants stockés en clair (username, password)
   try {
-    const res = db.exec('SELECT id, username, password, riot_tokens FROM smurfs');
+    const res = db.exec('SELECT id, username, password FROM smurfs');
     if (res.length > 0) {
       let migrated = 0;
       for (const row of res[0].values) {
-        const [id, username, password, tokens] = row;
-        const needs = [username, password, tokens].some(
+        const [id, username, password] = row;
+        const needs = [username, password].some(
           v => v !== null && v !== undefined && String(v) !== '' && !isEncrypted(v)
         );
         if (needs) {
           db.run(
-            'UPDATE smurfs SET username = ?, password = ?, riot_tokens = ? WHERE id = ?',
-            [encrypt(username), encrypt(password), encrypt(tokens), id]
+            'UPDATE smurfs SET username = ?, password = ? WHERE id = ?',
+            [encrypt(username), encrypt(password), id]
           );
           migrated++;
         }
@@ -254,6 +232,20 @@ export async function initDb() {
     }
   } catch (err) {
     console.error('[DB] Migration chiffrement échouée:', err.message);
+  }
+
+  // Migration: suppression des colonnes mortes (stats legacy remplacées par
+  // stats_json, cookies Riot jamais utilisés, date de session jamais écrite)
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    const columns = tableInfo.length > 0 ? tableInfo[0].values.map(row => row[1]) : [];
+    const dead = ['stats_30_ranked', 'stats_30_all', 'stats_season_ranked', 'stats_season_all', 'riot_tokens', 'session_saved_at'];
+    for (const col of dead.filter(c => columns.includes(c))) {
+      db.run(`ALTER TABLE smurfs DROP COLUMN ${col}`);
+      console.log(`[DB] Migration: colonne ${col} supprimee`);
+    }
+  } catch (err) {
+    console.error('[DB] Erreur suppression colonnes mortes:', err.message);
   }
 
   saveDatabase();
@@ -423,12 +415,7 @@ export function getUserSmurfs(userId) {
     ...smurf,
     username: decrypt(smurf.username),
     password: decrypt(smurf.password),
-    riot_tokens: decrypt(smurf.riot_tokens),
-    stats_json: smurf.stats_json ? JSON.parse(smurf.stats_json) : {},
-    stats_30_ranked: smurf.stats_30_ranked ? JSON.parse(smurf.stats_30_ranked) : null,
-    stats_30_all: smurf.stats_30_all ? JSON.parse(smurf.stats_30_all) : null,
-    stats_season_ranked: smurf.stats_season_ranked ? JSON.parse(smurf.stats_season_ranked) : null,
-    stats_season_all: smurf.stats_season_all ? JSON.parse(smurf.stats_season_all) : null
+    stats_json: smurf.stats_json ? JSON.parse(smurf.stats_json) : {}
   }));
 }
 
@@ -493,24 +480,6 @@ export function updateSmurfData(smurfId, data) {
     values.push(data.level);
   }
 
-  // Stats pré-calculées
-  if (data.stats_30_ranked !== undefined) {
-    fields.push('stats_30_ranked = ?');
-    values.push(JSON.stringify(data.stats_30_ranked));
-  }
-  if (data.stats_30_all !== undefined) {
-    fields.push('stats_30_all = ?');
-    values.push(JSON.stringify(data.stats_30_all));
-  }
-  if (data.stats_season_ranked !== undefined) {
-    fields.push('stats_season_ranked = ?');
-    values.push(JSON.stringify(data.stats_season_ranked));
-  }
-  if (data.stats_season_all !== undefined) {
-    fields.push('stats_season_all = ?');
-    values.push(JSON.stringify(data.stats_season_all));
-  }
-
   if (data.stats_json !== undefined) {
     fields.push('stats_json = ?');
     values.push(JSON.stringify(data.stats_json));
@@ -551,11 +520,6 @@ export function getSmurfById(smurfId) {
   // Déchiffrer les secrets
   if ('username' in smurf) smurf.username = decrypt(smurf.username);
   if ('password' in smurf) smurf.password = decrypt(smurf.password);
-  if ('riot_tokens' in smurf) smurf.riot_tokens = decrypt(smurf.riot_tokens);
-
-  if (smurf.stats) {
-    smurf.stats = JSON.parse(smurf.stats);
-  }
   return smurf;
 }
 
@@ -564,16 +528,6 @@ export function getSmurfById(smurfId) {
  */
 export function updateSmurfCredentials(smurfId, username, password) {
   db.run('UPDATE smurfs SET username = ?, password = ? WHERE id = ?', [encrypt(username), encrypt(password), smurfId]);
-  const changes = db.getRowsModified();
-  saveDatabase();
-  return changes > 0;
-}
-
-/**
- * Met à jour les tokens Riot d'un smurf
- */
-export function updateSmurfTokens(smurfId, tokens) {
-  db.run('UPDATE smurfs SET riot_tokens = ? WHERE id = ?', [encrypt(JSON.stringify(tokens)), smurfId]);
   const changes = db.getRowsModified();
   saveDatabase();
   return changes > 0;
@@ -691,10 +645,7 @@ export function resetAllSmurfData() {
       flex_wins = 0,
       flex_losses = 0,
       level = 0,
-      stats_30_ranked = NULL,
-      stats_30_all = NULL,
-      stats_season_ranked = NULL,
-      stats_season_all = NULL,
+      stats_json = NULL,
       last_updated = NULL
   `);
   const changes = db.getRowsModified();
@@ -716,10 +667,10 @@ export function updateSmurfOrder(userId, orderList) {
 // === EXPORT / IMPORT ===
 
 const SMURF_EXPORT_FIELDS = [
-  'puuid', 'pseudo', 'username', 'password', 'riot_tokens',
+  'puuid', 'pseudo', 'username', 'password',
   'soloq_tier', 'soloq_rank', 'soloq_lp', 'soloq_wins', 'soloq_losses',
   'flex_tier', 'flex_rank', 'flex_lp', 'flex_wins', 'flex_losses',
-  'level', 'stats_json', 'sort_order', 'session_saved_at', 'last_updated'
+  'level', 'stats_json', 'sort_order', 'last_updated'
 ];
 
 /**
@@ -768,34 +719,31 @@ export function importUserData(userId, data) {
   for (const s of (data.smurfs || [])) {
     if (!s.puuid || !s.pseudo) continue;
     const statsJson = s.stats_json ? JSON.stringify(s.stats_json) : null;
-    const riotTokens = s.riot_tokens
-      ? encrypt(typeof s.riot_tokens === 'string' ? s.riot_tokens : JSON.stringify(s.riot_tokens))
-      : null;
     const values = [
-      s.pseudo, encrypt(s.username || ''), encrypt(s.password || ''), riotTokens,
+      s.pseudo, encrypt(s.username || ''), encrypt(s.password || ''),
       s.soloq_tier ?? null, s.soloq_rank ?? null, s.soloq_lp ?? 0, s.soloq_wins ?? 0, s.soloq_losses ?? 0,
       s.flex_tier ?? null, s.flex_rank ?? null, s.flex_lp ?? 0, s.flex_wins ?? 0, s.flex_losses ?? 0,
-      s.level ?? 0, statsJson, s.sort_order ?? null, s.session_saved_at ?? null, s.last_updated ?? null
+      s.level ?? 0, statsJson, s.sort_order ?? null, s.last_updated ?? null
     ];
 
     const match = existingSmurfs.find(e => e.puuid === s.puuid);
     if (match) {
       db.run(`
         UPDATE smurfs SET
-          pseudo = ?, username = ?, password = ?, riot_tokens = ?,
+          pseudo = ?, username = ?, password = ?,
           soloq_tier = ?, soloq_rank = ?, soloq_lp = ?, soloq_wins = ?, soloq_losses = ?,
           flex_tier = ?, flex_rank = ?, flex_lp = ?, flex_wins = ?, flex_losses = ?,
-          level = ?, stats_json = ?, sort_order = ?, session_saved_at = ?, last_updated = ?
+          level = ?, stats_json = ?, sort_order = ?, last_updated = ?
         WHERE id = ?
       `, [...values, match.id]);
     } else {
       db.run(`
         INSERT INTO smurfs (
-          user_id, puuid, pseudo, username, password, riot_tokens,
+          user_id, puuid, pseudo, username, password,
           soloq_tier, soloq_rank, soloq_lp, soloq_wins, soloq_losses,
           flex_tier, flex_rank, flex_lp, flex_wins, flex_losses,
-          level, stats_json, sort_order, session_saved_at, last_updated, session_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          level, stats_json, sort_order, last_updated, session_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [userId, s.puuid, ...values, newSessionKey()]);
     }
     smurfCount++;
@@ -853,7 +801,6 @@ export default {
   updateSmurfData,
   updateSmurfCredentials,
   updateSmurfPuuid,
-  updateSmurfTokens,
   updateSmurfOrder,
   deleteSmurf,
   getSmurfById,

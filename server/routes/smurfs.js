@@ -76,7 +76,6 @@ router.get('/', requireAuth, (req, res) => {
       StatsState: statsState,
       last_updated: smurf.last_updated,
       id: smurf.id,
-      hasToken: !!smurf.riot_tokens,
       SessionKey: smurf.session_key,
       sort_order: smurf.sort_order,
       is_syncing: false

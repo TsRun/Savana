@@ -10,9 +10,11 @@
  * - `decrypt()` renvoie tel quel toute valeur NON préfixée → compatibilité
  *   ascendante avec les données historiques en clair (migration progressive).
  *
- * NOTE sécurité: pour un durcissement supplémentaire (liaison au compte OS),
- * la clé pourrait être scellée via Electron `safeStorage` (DPAPI/Keychain).
- * Voir recommandations de l'audit.
+ * - Dans l'app installée, la clé est scellée par le coffre Windows (Electron
+ *   `safeStorage` / DPAPI) dans `.savana_key.sealed` : le process principal la
+ *   descelle et la transmet au backend via SAVANA_DB_KEY, et `.savana_key` en
+ *   clair n'existe plus. Le fichier en clair reste le repli (dev, ou coffre
+ *   indisponible).
  */
 import crypto from 'crypto';
 import fs from 'fs';
@@ -22,8 +24,17 @@ import { config } from '../config.js';
 const PREFIX = 'enc:v1:';
 let keyCache = null;
 
+// Clé transmise par Electron (descellée via DPAPI). Retirée de l'environnement
+// pour ne pas être héritée par les processus que le backend lance.
+const envKey = process.env.SAVANA_DB_KEY;
+delete process.env.SAVANA_DB_KEY;
+
 function getKey() {
   if (keyCache) return keyCache;
+  if (envKey && /^[0-9a-f]{64}$/i.test(envKey)) {
+    keyCache = Buffer.from(envKey, 'hex');
+    return keyCache;
+  }
   const dir = path.dirname(config.dbPath);
   const keyPath = path.join(dir, '.savana_key');
 
