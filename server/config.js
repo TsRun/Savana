@@ -2,6 +2,9 @@ import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+// Import circulaire assumé : crypto.js lit `config.dbPath` et config.js utilise
+// encrypt/decrypt, mais chacun seulement à l'exécution, jamais au chargement.
+import { encrypt, decrypt, isEncrypted } from './utils/crypto.js';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -54,9 +57,10 @@ function resolveSessionSecret() {
 }
 
 /**
- * Clé API Riot — plus jamais embarquée dans l'installeur.
+ * Clé API Riot, plus jamais embarquée dans l'installeur.
  * Priorité : variable d'environnement (dev/.env) > fichier local userData
- * (saisie via l'UI au premier lancement).
+ * (saisie via l'UI au premier lancement). Le fichier est chiffré avec la clé
+ * de la base (elle-même scellée par DPAPI dans l'app installée).
  */
 const riotKeyPath = path.join(
   process.env.USER_DATA_PATH || path.join(_dirname, '..'),
@@ -74,19 +78,28 @@ export function getRiotApiKey() {
   if (process.env.RIOT_API_KEY) return normalizeRiotKey(process.env.RIOT_API_KEY);
   if (riotKeyCache !== undefined) return riotKeyCache;
   try {
-    riotKeyCache = fs.existsSync(riotKeyPath)
-      ? normalizeRiotKey(fs.readFileSync(riotKeyPath, 'utf8')) || null
-      : null;
+    if (!fs.existsSync(riotKeyPath)) {
+      riotKeyCache = null;
+    } else {
+      const raw = fs.readFileSync(riotKeyPath, 'utf8').trim();
+      riotKeyCache = normalizeRiotKey(isEncrypted(raw) ? decrypt(raw) : raw) || null;
+      // Migration : une clé encore en clair (versions précédentes) est rechiffrée
+      if (riotKeyCache && !isEncrypted(raw)) {
+        fs.writeFileSync(riotKeyPath, encrypt(riotKeyCache), { mode: 0o600 });
+        console.log('[CONFIG] Clé API Riot chiffrée sur disque');
+      }
+    }
   } catch (e) {
+    console.error('[CONFIG] Lecture de la clé API Riot impossible:', e.message);
     riotKeyCache = null;
   }
   return riotKeyCache;
 }
 
 export function setRiotApiKey(key) {
-  const trimmed = String(key || '').trim();
+  const trimmed = normalizeRiotKey(key);
   if (!trimmed) throw new Error('Clé vide');
-  fs.writeFileSync(riotKeyPath, trimmed, { mode: 0o600 });
+  fs.writeFileSync(riotKeyPath, encrypt(trimmed), { mode: 0o600 });
   riotKeyCache = trimmed;
   return true;
 }
