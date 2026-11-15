@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('get-saved-sessions');
   },
 
+  // Renommer les anciens dossiers de session (nommés d'après le pseudo) vers la clé du compte
+  migrateSessions: (mappings) => {
+    return ipcRenderer.invoke('migrate-sessions', mappings);
+  },
+
   // Supprimer la session sauvegardée d'un compte
   deleteSession: (filename) => {
     return ipcRenderer.invoke('delete-session', { filename });

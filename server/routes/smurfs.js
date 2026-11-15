@@ -76,6 +76,7 @@ router.get('/', requireAuth, (req, res) => {
       last_updated: smurf.last_updated,
       id: smurf.id,
       hasToken: !!smurf.riot_tokens,
+      SessionKey: smurf.session_key,
       sort_order: smurf.sort_order,
       is_syncing: false
     };
@@ -109,13 +110,23 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'PUUID ou Riot ID requis' });
   }
 
+  const existing = db.getUserSmurfs(userId).find(s => s.puuid === puuid);
+  if (existing) {
+    return res.status(409).json({
+      error: 'Ce compte est déjà enregistré',
+      id: existing.id,
+      Pseudo: existing.pseudo,
+      SessionKey: existing.session_key
+    });
+  }
+
   const smurfId = db.addSmurf(userId, puuid, pseudo, username || '', password || '');
 
   // Prioritize update
   scheduler.enqueue(smurfId);
 
   const smurf = db.getSmurfById(smurfId);
-  res.status(201).json(smurf);
+  res.status(201).json({ id: smurf.id, Pseudo: smurf.pseudo, SessionKey: smurf.session_key });
 });
 
 /**

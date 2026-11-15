@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -345,12 +345,110 @@ ipcMain.handle('wait-riot-login', async (event, { timeout = 60000 } = {}) => {
 // SESSION MANAGEMENT
 // =====================================================
 
-function getSessionDir(filename) {
-  const sessionDir = path.join(app.getPath('userData'), 'sessions', filename);
-  if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true });
-  }
+// Chaque compte a son dossier `sessions/<session_key>/`, où session_key est une
+// clé aléatoire stockée en base (jamais le pseudo : un Riot ID change, et deux
+// pseudos peuvent se ressembler). Le YAML Riot, qui contient les jetons de
+// connexion, est chiffré avec le coffre Windows (safeStorage / DPAPI).
+const SESSION_FILE = 'RiotGamesPrivateSettings.yaml';
+const SESSION_FILE_ENC = 'RiotGamesPrivateSettings.yaml.enc';
+const SESSION_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function sessionsRoot() {
+  return path.join(app.getPath('userData'), 'sessions');
+}
+
+function getSessionDir(filename, { create = false } = {}) {
+  if (!SESSION_NAME_RE.test(String(filename || ''))) throw new Error('Nom de session invalide');
+  const sessionDir = path.join(sessionsRoot(), filename);
+  if (create && !fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
   return sessionDir;
+}
+
+function canSealSessions() {
+  try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
+}
+
+// Écrit le YAML de session (chiffré si possible) et supprime l'éventuelle copie en clair.
+// `mtime` permet de conserver la date de sauvegarde d'origine lors d'une migration.
+function writeSessionFile(sessionDir, content, mtime = null) {
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const plainPath = path.join(sessionDir, SESSION_FILE);
+  const encPath = path.join(sessionDir, SESSION_FILE_ENC);
+  let written;
+  if (canSealSessions()) {
+    const tmp = encPath + '.tmp';
+    fs.writeFileSync(tmp, safeStorage.encryptString(content.toString('utf8')));
+    fs.renameSync(tmp, encPath);
+    fs.rmSync(plainPath, { force: true });
+    written = encPath;
+  } else {
+    console.warn('[Session] safeStorage indisponible, session écrite en clair');
+    fs.writeFileSync(plainPath, content);
+    written = plainPath;
+  }
+  if (mtime) {
+    try { fs.utimesSync(written, mtime, mtime); } catch (e) { }
+  }
+}
+
+// Renvoie le contenu du YAML de session (Buffer) ou null si aucune session.
+function readSessionFile(sessionDir) {
+  const encPath = path.join(sessionDir, SESSION_FILE_ENC);
+  if (fs.existsSync(encPath)) {
+    return Buffer.from(safeStorage.decryptString(fs.readFileSync(encPath)), 'utf8');
+  }
+  const plainPath = path.join(sessionDir, SESSION_FILE);
+  if (fs.existsSync(plainPath)) return fs.readFileSync(plainPath);
+  return null;
+}
+
+function sessionFileStat(sessionDir) {
+  for (const f of [SESSION_FILE_ENC, SESSION_FILE]) {
+    const p = path.join(sessionDir, f);
+    if (fs.existsSync(p)) return fs.statSync(p);
+  }
+  return null;
+}
+
+function removeSessionFiles(sessionDir) {
+  for (const f of [SESSION_FILE_ENC, SESSION_FILE]) {
+    try { fs.rmSync(path.join(sessionDir, f), { force: true }); } catch (e) { }
+  }
+}
+
+// Injecte une session sauvegardée dans tous les dossiers Data Riot trouvés.
+function injectSession(content, possiblePaths, logPrefix) {
+  let restored = false;
+  for (const p of possiblePaths) {
+    const dataDir = p.data;
+    if (fs.existsSync(dataDir)) {
+      const yamlDest = path.join(dataDir, SESSION_FILE);
+      try { fs.rmSync(yamlDest, { force: true }); } catch (e) { }
+      fs.writeFileSync(yamlDest, content);
+      console.log(`${logPrefix} Session injected: ${yamlDest}`);
+      restored = true;
+    }
+  }
+  return restored;
+}
+
+// Chiffre au démarrage les sessions encore stockées en clair (versions précédentes).
+function sealLegacySessions() {
+  if (!canSealSessions()) return;
+  const root = sessionsRoot();
+  if (!fs.existsSync(root)) return;
+  for (const name of fs.readdirSync(root)) {
+    const dir = path.join(root, name);
+    const plainPath = path.join(dir, SESSION_FILE);
+    try {
+      if (!fs.statSync(dir).isDirectory() || !fs.existsSync(plainPath)) continue;
+      const { mtime } = fs.statSync(plainPath);
+      writeSessionFile(dir, fs.readFileSync(plainPath), mtime);
+      console.log(`[Session] Session chiffrée: ${name}`);
+    } catch (e) {
+      console.error(`[Session] Chiffrement impossible pour ${name}:`, e.message);
+    }
+  }
 }
 
 ipcMain.handle('save-session', async (event, { filename }) => {
@@ -363,7 +461,7 @@ ipcMain.handle('save-session', async (event, { filename }) => {
 
     let sourcePath = null;
     for (const p of possiblePaths) {
-      const candidate = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      const candidate = path.join(p.data, SESSION_FILE);
       if (fs.existsSync(candidate)) {
         sourcePath = candidate;
         break;
@@ -372,16 +470,47 @@ ipcMain.handle('save-session', async (event, { filename }) => {
 
     if (!sourcePath) throw new Error('Fichier RiotGamesPrivateSettings.yaml non trouvé (Lancez Riot Client une fois)');
 
-    const sessionDir = getSessionDir(filename);
-    const destPath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
-
-    fs.copyFileSync(sourcePath, destPath);
-    console.log(`[Save] Session saved: ${sourcePath} -> ${destPath}`);
+    const sessionDir = getSessionDir(filename, { create: true });
+    writeSessionFile(sessionDir, fs.readFileSync(sourcePath));
+    console.log(`[Save] Session saved: ${sourcePath} -> ${sessionDir}`);
     return { success: true, message: 'Session sauvegardée' };
   } catch (error) {
     console.error('[Save] Error:', error.message);
     return { success: false, error: error.message };
   }
+});
+
+// Migration des anciens dossiers nommés d'après le pseudo (`Pseudo_TAG`) vers la
+// clé de session du compte. Un ancien nom partagé par plusieurs comptes est
+// ambigu : on le laisse tel quel plutôt que risquer d'attribuer la mauvaise session.
+// Uniquement dans l'app installée : en dev, la base (et donc les clés) diffère
+// alors que le dossier sessions est le même.
+ipcMain.handle('migrate-sessions', async (event, mappings) => {
+  const result = { migrated: 0, skipped: 0 };
+  if (!app.isPackaged || !Array.isArray(mappings)) return result;
+  const counts = new Map();
+  for (const m of mappings) {
+    if (m && m.legacy) counts.set(m.legacy, (counts.get(m.legacy) || 0) + 1);
+  }
+  for (const { key, legacy } of mappings) {
+    try {
+      if (!key || !legacy || key === legacy) continue;
+      const legacyDir = getSessionDir(legacy);
+      const targetDir = getSessionDir(key);
+      if (!fs.existsSync(legacyDir) || !sessionFileStat(legacyDir)) continue;
+      if (counts.get(legacy) > 1 || fs.existsSync(targetDir)) {
+        result.skipped++;
+        console.warn(`[Session] Migration ignorée pour ${legacy} (ambigu ou déjà migré)`);
+        continue;
+      }
+      fs.renameSync(legacyDir, targetDir);
+      result.migrated++;
+      console.log(`[Session] Migrée: ${legacy} -> ${key}`);
+    } catch (e) {
+      console.error(`[Session] Migration échouée pour ${legacy}:`, e.message);
+    }
+  }
+  return result;
 });
 
 ipcMain.handle('update-launch-status', (event, data) => {
@@ -398,10 +527,9 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     console.log(`[Load] Starting load-session for: ${filename}`);
 
     const sessionDir = getSessionDir(filename);
-    const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
-
-    if (!fs.existsSync(sourcePath)) throw new Error('Aucune session sauvegardée pour ce compte');
-    console.log(`[Load] Session file found: ${sourcePath}`);
+    const sessionContent = readSessionFile(sessionDir);
+    if (!sessionContent) throw new Error('Aucune session sauvegardée pour ce compte');
+    console.log(`[Load] Session found: ${sessionDir}`);
 
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
@@ -412,18 +540,7 @@ ipcMain.handle('load-session', async (event, { filename }) => {
     console.log('[Load] Processes killed, waiting before inject...');
     await sleep(500);
 
-    let restored = false;
-    for (const p of possiblePaths) {
-      const dataDir = p.data;
-      if (fs.existsSync(dataDir)) {
-        const yamlDest = path.join(dataDir, 'RiotGamesPrivateSettings.yaml');
-        try { fs.rmSync(yamlDest, { force: true }); } catch (e) { }
-        fs.copyFileSync(sourcePath, yamlDest);
-        console.log(`[Load] Session injected: ${yamlDest}`);
-        restored = true;
-      }
-    }
-
+    const restored = injectSession(sessionContent, possiblePaths, '[Load]');
     if (!restored) throw new Error('Dossier Data Riot introuvable');
 
     send('Lancement de League...');
@@ -502,10 +619,8 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
     await killRiotClient();
     await sleep(500);
 
-    const sessionDir = getSessionDir(filename);
-    const sourcePath = path.join(sessionDir, 'RiotGamesPrivateSettings.yaml');
-
-    if (!fs.existsSync(sourcePath)) {
+    const sessionContent = readSessionFile(getSessionDir(filename));
+    if (!sessionContent) {
       console.log('[RiotOnly] No session file found');
       return { success: false, error: 'no-session' };
     }
@@ -513,18 +628,7 @@ ipcMain.handle('load-session-riot-only', async (event, { filename, timeout = 300
     const possiblePaths = getAllPossibleRiotPaths();
     if (possiblePaths.length === 0) throw new Error('Aucune installation Riot trouvée');
 
-    let restored = false;
-    for (const p of possiblePaths) {
-      const dataDir = p.data;
-      if (fs.existsSync(dataDir)) {
-        const yamlDest = path.join(dataDir, 'RiotGamesPrivateSettings.yaml');
-        try { fs.rmSync(yamlDest, { force: true }); } catch (e) { }
-        fs.copyFileSync(sourcePath, yamlDest);
-        console.log(`[RiotOnly] Session injected: ${yamlDest}`);
-        restored = true;
-      }
-    }
-
+    const restored = injectSession(sessionContent, possiblePaths, '[RiotOnly]');
     if (!restored) throw new Error('Dossier Data Riot introuvable');
 
     send('Lancement Riot Client...');
@@ -611,7 +715,7 @@ ipcMain.handle('wait-riot-client', async (event, { timeout = 60000, label = '' }
 ipcMain.handle('delete-session', async (event, { filename }) => {
   try {
     if (!filename) throw new Error('Filename requis');
-    const sessionDir = path.join(app.getPath('userData'), 'sessions', filename);
+    const sessionDir = getSessionDir(filename);
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     }
@@ -623,24 +727,19 @@ ipcMain.handle('delete-session', async (event, { filename }) => {
 
 ipcMain.handle('get-saved-sessions', async () => {
   try {
-    const sessionsDir = path.join(app.getPath('userData'), 'sessions');
+    const sessionsDir = sessionsRoot();
     if (!fs.existsSync(sessionsDir)) return [];
 
-    const sessionDirs = fs.readdirSync(sessionsDir).filter(f => {
-      const p = path.join(sessionsDir, f);
-      return fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'RiotGamesPrivateSettings.yaml'));
-    });
-
-    // Return session objects with metadata
-    return sessionDirs.map(name => {
-      const yamlPath = path.join(sessionsDir, name, 'RiotGamesPrivateSettings.yaml');
-      let savedAt = null;
+    const sessions = [];
+    for (const name of fs.readdirSync(sessionsDir)) {
+      const dir = path.join(sessionsDir, name);
       try {
-        const stats = fs.statSync(yamlPath);
-        savedAt = stats.mtime.toISOString();
+        if (!fs.statSync(dir).isDirectory()) continue;
+        const stat = sessionFileStat(dir);
+        if (stat) sessions.push({ name, savedAt: stat.mtime.toISOString() });
       } catch (e) { }
-      return { name, savedAt };
-    });
+    }
+    return sessions;
   } catch (error) {
     return [];
   }
@@ -682,12 +781,9 @@ ipcMain.handle('backup-riot-session', async () => {
   try {
     const possiblePaths = getAllPossibleRiotPaths();
     for (const p of possiblePaths) {
-      const yamlPath = path.join(p.data, 'RiotGamesPrivateSettings.yaml');
+      const yamlPath = path.join(p.data, SESSION_FILE);
       if (fs.existsSync(yamlPath)) {
-        const backupDir = path.join(app.getPath('userData'), 'sessions', '_backup');
-        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-        const backupPath = path.join(backupDir, 'RiotGamesPrivateSettings.yaml');
-        fs.copyFileSync(yamlPath, backupPath);
+        writeSessionFile(getSessionDir('_backup', { create: true }), fs.readFileSync(yamlPath));
         return { success: true };
       }
     }
@@ -700,9 +796,9 @@ ipcMain.handle('backup-riot-session', async () => {
 // Restore backed up session and relaunch Riot Client
 ipcMain.handle('restore-riot-session', async () => {
   try {
-    const backupDir = path.join(app.getPath('userData'), 'sessions', '_backup');
-    const backupPath = path.join(backupDir, 'RiotGamesPrivateSettings.yaml');
-    if (!fs.existsSync(backupPath)) return { success: false, error: 'no backup found' };
+    const backupDir = getSessionDir('_backup');
+    const backupContent = readSessionFile(backupDir);
+    if (!backupContent) return { success: false, error: 'no backup found' };
 
     await killRiotClient();
     await sleep(1500);
@@ -717,7 +813,7 @@ ipcMain.handle('restore-riot-session', async () => {
         for (const file of fs.readdirSync(dataDir)) {
           try { fs.rmSync(path.join(dataDir, file), { recursive: true, force: true }); } catch (e) { }
         }
-        fs.copyFileSync(backupPath, path.join(dataDir, 'RiotGamesPrivateSettings.yaml'));
+        fs.writeFileSync(path.join(dataDir, SESSION_FILE), backupContent);
         restored = true;
       }
     }
@@ -725,7 +821,7 @@ ipcMain.handle('restore-riot-session', async () => {
     if (!restored) return { success: false, error: 'no Riot data dir found' };
 
     // Clean up backup
-    try { fs.rmSync(backupPath, { force: true }); } catch (e) { }
+    removeSessionFiles(backupDir);
 
     // Relaunch Riot Client
     await launchRiotClientOnly();
@@ -736,6 +832,7 @@ ipcMain.handle('restore-riot-session', async () => {
 });
 
 app.whenReady().then(() => {
+  sealLegacySessions();
   createWindow();
 
   if (app.isPackaged) {

@@ -653,9 +653,12 @@ const handleImportFile = async (e) => {
   }
 };
 
-const getSafeFilename = (pseudo) => {
-  return pseudo.replace(/[^a-zA-Z0-9]/g, '_');
-};
+// Dossier de session Riot d'un compte : sa clé aléatoire stockée en base
+const sessionKey = (smurf) => smurf?.SessionKey || null;
+
+// Ancien nommage (d'après le pseudo), utilisé seulement pour migrer les dossiers existants
+const legacySessionName = (pseudo) => pseudo.replace(/[^a-zA-Z0-9]/g, '_');
+let sessionsMigrated = false;
 
 const fetchSmurfs = async () => {
   try {
@@ -666,10 +669,17 @@ const fetchSmurfs = async () => {
     // Si on est dans Electron, vérifier les sessions sauvegardées
     if (window.electronAPI?.isElectron) {
       try {
+        if (!sessionsMigrated) {
+          sessionsMigrated = true;
+          await window.electronAPI.migrateSessions(
+            data.filter(s => s.Pseudo && s.SessionKey)
+                .map(s => ({ key: s.SessionKey, legacy: legacySessionName(s.Pseudo) }))
+          );
+        }
         const savedSessions = await window.electronAPI.getSavedSessions();
         smurfs.value = data.map(s => {
-            const safeName = s.Pseudo ? getSafeFilename(s.Pseudo) : null;
-            const sessionInfo = safeName ? savedSessions.find(sess => sess.name === safeName) : null;
+            const key = sessionKey(s);
+            const sessionInfo = key ? savedSessions.find(sess => sess.name === key) : null;
             return {
                 ...s,
                 hasSession: !!sessionInfo,
@@ -848,7 +858,7 @@ const saveAllSessions = async () => {
       const currentAccount = smurfs.value.find(s => s.PUUID === originalSessionPuuid);
       if (currentAccount) {
         const name = currentAccount.Pseudo?.split('#')[0] || '?';
-        const filename = currentAccount.Pseudo ? getSafeFilename(currentAccount.Pseudo) : null;
+        const filename = sessionKey(currentAccount);
         if (filename) {
           const saveRes = await window.electronAPI.saveSession(filename);
           if (saveRes.success) {
@@ -870,7 +880,7 @@ const saveAllSessions = async () => {
 
     const smurf = smurfs.value[i];
     const name = smurf.Pseudo?.split('#')[0] || '?';
-    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
+    const filename = sessionKey(smurf);
     if (!filename) { skipped++; continue; }
 
     const label = `[${i + 1}/${total}] ${name}`;
@@ -1051,8 +1061,14 @@ const deleteSmurf = async (smurfId) => {
   if (confirmed.action !== 'confirm') return;
 
   try {
+    const key = sessionKey(smurfs.value.find(s => s.id === smurfId));
     const res = await fetch(apiUrl.value + '/smurfs/' + smurfId, { method: 'DELETE', credentials: 'include' });
-    if (res.ok) { await fetchSmurfs(); showToast('Compte supprimé', 'success'); }
+    if (res.ok) {
+      // La session Riot sauvegardée (jetons de connexion) part avec le compte
+      if (key && window.electronAPI?.isElectron) await window.electronAPI.deleteSession(key);
+      await fetchSmurfs();
+      showToast('Compte supprimé', 'success');
+    }
   } catch (e) { showToast('Échec de la suppression', 'error'); }
 };
 
@@ -1062,16 +1078,10 @@ const handleSaveSession = async (smurf) => {
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
     
-    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
-    if (!filename) throw new Error('Impossible de générer un nom de fichier pour ce compte');
+    const filename = sessionKey(smurf);
+    if (!filename) throw new Error('Clé de session introuvable pour ce compte');
 
-    // Appeler Electron pour sauvegarder le fichier
-    // On passe filename au lieu de smurfId
-    const res = await window.electronAPI.saveSession(filename); // Pass directly as property expectation? Wait, updated main.cjs expects { filename } object structure or direct arg? 
-    // Checking main.cjs: ipcMain.handle('save-session', async (event, { filename }) ...
-    // So we need to pass object { filename: '...' }
-    // Wait, let's verify how preload exposes it. Usually it's (...args) => ipcRenderer.invoke('save-session', ...args)
-    // If preload matches main usage, we pass object.
+    const res = await window.electronAPI.saveSession(filename);
 
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
 
@@ -1116,8 +1126,8 @@ const handleLoadSession = async (smurf) => {
   try {
     if (!window.electronAPI?.isElectron) throw new Error('Disponible uniquement sur l\'application Desktop');
 
-    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
-    if (!filename) throw new Error('Impossible de générer un nom de fichier pour ce compte');
+    const filename = sessionKey(smurf);
+    if (!filename) throw new Error('Clé de session introuvable pour ce compte');
 
     const res = await window.electronAPI.loadSession(filename);
     if (!res.success) throw new Error(res.error || 'Erreur inconnue');
@@ -1144,8 +1154,8 @@ const handleDisconnectSession = async (smurf) => {
   if (confirmed.action !== 'confirm') return;
 
   try {
-    const filename = smurf.Pseudo ? getSafeFilename(smurf.Pseudo) : null;
-    if (!filename) throw new Error('Nom de fichier invalide');
+    const filename = sessionKey(smurf);
+    if (!filename) throw new Error('Clé de session introuvable pour ce compte');
     const res = await window.electronAPI.deleteSession(filename);
     if (!res.success) throw new Error(res.error || 'Erreur');
     await fetchSmurfs();

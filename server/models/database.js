@@ -9,6 +9,15 @@ let db = null;
 let SQL = null;
 
 /**
+ * Clé aléatoire et stable qui nomme le dossier de session Riot d'un compte
+ * (`sessions/<session_key>/`). Indépendante du pseudo (qui peut changer) et
+ * de l'id (qui diffère entre la base de dev et celle de l'app installée).
+ */
+function newSessionKey() {
+  return crypto.randomBytes(12).toString('hex');
+}
+
+/**
  * Sauvegarde la base de données sur le disque
  */
 function saveDatabase() {
@@ -205,6 +214,24 @@ export async function initDb() {
     console.error('[DB] Erreur migration sort_order:', err.message);
   }
 
+  // Migration: clé de session par compte (nom du dossier de session Riot)
+  try {
+    const tableInfo = db.exec("PRAGMA table_info(smurfs)");
+    const columns = tableInfo.length > 0 ? tableInfo[0].values.map(row => row[1]) : [];
+    if (!columns.includes('session_key')) {
+      db.run('ALTER TABLE smurfs ADD COLUMN session_key TEXT DEFAULT NULL');
+      console.log('[DB] Migration: colonne session_key ajoutee');
+    }
+    const missing = db.exec('SELECT id FROM smurfs WHERE session_key IS NULL');
+    if (missing.length > 0) {
+      for (const [id] of missing[0].values) {
+        db.run('UPDATE smurfs SET session_key = ? WHERE id = ?', [newSessionKey(), id]);
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Erreur migration session_key:', err.message);
+  }
+
   // Migration: chiffrer les secrets existants stockés en clair (username, password, riot_tokens)
   try {
     const res = db.exec('SELECT id, username, password, riot_tokens FROM smurfs');
@@ -365,9 +392,9 @@ export function getUserInfo(userId) {
  */
 export function addSmurf(userId, puuid, pseudo, username, password) {
   db.run(`
-    INSERT INTO smurfs (user_id, puuid, pseudo, username, password)
-    VALUES (?, ?, ?, ?, ?)
-  `, [userId, puuid, pseudo, encrypt(username), encrypt(password)]);
+    INSERT INTO smurfs (user_id, puuid, pseudo, username, password, session_key)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `, [userId, puuid, pseudo, encrypt(username), encrypt(password), newSessionKey()]);
 
   const result = db.exec('SELECT last_insert_rowid() as id');
   saveDatabase();
@@ -767,9 +794,9 @@ export function importUserData(userId, data) {
           user_id, puuid, pseudo, username, password, riot_tokens,
           soloq_tier, soloq_rank, soloq_lp, soloq_wins, soloq_losses,
           flex_tier, flex_rank, flex_lp, flex_wins, flex_losses,
-          level, stats_json, sort_order, session_saved_at, last_updated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [userId, s.puuid, ...values]);
+          level, stats_json, sort_order, session_saved_at, last_updated, session_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [userId, s.puuid, ...values, newSessionKey()]);
     }
     smurfCount++;
   }

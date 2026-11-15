@@ -158,11 +158,6 @@ function close() {
   emit('close');
 }
 
-// Helper for cleaning filename
-const getSafeFilename = (pseudo) => {
-  return pseudo.replace(/[^a-zA-Z0-9]/g, '_');
-};
-
 async function handleImport() {
   importing.value = true;
   loading.value = true;
@@ -222,10 +217,8 @@ async function performSubmit(autoSaveSession = false) {
     const data = await res.json();
     
     if (!res.ok) {
-      if (res.status === 409 && autoSaveSession) {
-          // If already exists and we are importing, we still want to save session!
-          // Proceed to save session. 
-          // But we need to know the ID? Actually saveSession inputs are just file ops.
+      if (res.status === 409 && autoSaveSession && data.SessionKey) {
+          // Compte déjà enregistré : on met juste à jour sa session
       } else {
         throw new Error(data.error || 'Erreur lors de l\'ajout');
       }
@@ -235,8 +228,8 @@ async function performSubmit(autoSaveSession = false) {
     if (autoSaveSession) {
        if (!window.electronAPI?.isElectron) throw new Error("Feature disponible uniquement sur l'application Desktop");
        
-       const filename = getSafeFilename(fullRiotId);
-       const saveRes = await window.electronAPI.saveSession(filename);
+       if (!data.SessionKey) throw new Error('Compte ajouté mais clé de session manquante');
+       const saveRes = await window.electronAPI.saveSession(data.SessionKey);
        
        if (!saveRes.success) throw new Error('Compte ajouté mais erreur sauvegarde session: ' + saveRes.error);
        
