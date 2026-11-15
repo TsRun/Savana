@@ -47,7 +47,7 @@ SQLite via sql.js (`server/models/database.js`). Tables:
 - `user_preferences` -- stats_period (30/season), stats_queue (soloq/flex/all), tour_completed
 - `friends` -- puuid, pseudo, stats_json, last_updated
 
-Migrations are inline in `initDb()`. The DB file lives at project root (`smurfs.db`) in dev, `%AppData%/Savana/smurfs.db` in production, and is written atomically (tmp file + rename). The encryption key is `.savana_key` (plaintext) in dev; in production Electron seals it as `.savana_key.sealed` (DPAPI) and passes it to the forked backend via `SAVANA_DB_KEY`.
+Migrations are inline in `initDb()`. The DB file lives at project root (`smurfs.db`) in dev, `%AppData%/Savana/smurfs.db` in production, and is written atomically (tmp file + rename). The encryption key is `.savana_key` (plaintext) in dev; in production Electron seals it as `.savana_key.sealed` (DPAPI) and passes it to the forked backend via `SAVANA_DB_KEY`. The in-app Riot API key (`.riot_api_key`) is encrypted with that same key. Exports (`POST /api/data/export`, format v2) put Riot credentials in a `secrets` blob encrypted with a user password (scrypt + AES-256-GCM); import asks for it, v1 plaintext exports still import.
 
 ## Environment
 
