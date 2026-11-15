@@ -23,7 +23,7 @@ Three processes work together:
 
 1. **Electron main** (`electron/main.cjs`) -- Forks the backend as a child process, creates a frameless BrowserWindow, handles IPC for window controls, clipboard, and all Riot Client operations (session save/load/delete, credential injection).
 
-2. **Express backend** (`server/server.js`) -- Runs on port 3000 (dev) or a dynamic port (prod). Uses sql.js for SQLite with file persistence. In production, sends its port to Electron via `process.send({ type: 'PORT', port })` and serves the Vue frontend as static files. Routes: `auth`, `smurfs`, `friends`, `preferences`, `tokens`, `riotClient`.
+2. **Express backend** (`server/server.js`) -- Runs on port 3000 (dev) or a dynamic port (prod). Uses sql.js for SQLite with file persistence. In production, sends its port to Electron via `process.send({ type: 'PORT', port })` and serves the Vue frontend as static files. Routes: `auth`, `smurfs`, `friends`, `preferences`, `settings`, `data`, `riotClient`.
 
 3. **Vue 3 frontend** (`src/`) -- Served by Vite in dev (port 5173, proxies `/api` to backend) or by Express in production. Uses `src/composables/useApi.js` to resolve the API base URL: if loaded over HTTP it uses relative `/api`, otherwise fetches the port from Electron IPC.
 
@@ -32,7 +32,8 @@ Three processes work together:
 - Frontend calls `/api/*` endpoints
 - Backend queries Riot API (rate-limited at 1.25s/request in `server/utils/riotApi.js`) and persists to SQLite
 - Smurf rank/stat updates are processed via a FIFO scheduler queue in `server/routes/smurfs.js`
-- Riot Client sessions are YAML files (`RiotGamesPrivateSettings.yaml`) saved to `{userData}/sessions/{pseudo}/`
+- Riot Client sessions are YAML files saved to `{userData}/sessions/{session_key}/RiotGamesPrivateSettings.yaml.enc`, encrypted with Electron `safeStorage` (DPAPI). `session_key` is a random per-account key in the DB (never the pseudo, never the id: dev and prod share the sessions folder but not the DB). Legacy pseudo-named folders are migrated by `migrate-sessions` (packaged app only)
+- `GET /api/smurfs` never returns passwords (`HasPassword` flag only); credentials are fetched per account via `GET /api/smurfs/:id/credentials`
 
 ### IPC bridge
 
@@ -42,11 +43,11 @@ Three processes work together:
 
 SQLite via sql.js (`server/models/database.js`). Tables:
 - `users` -- id, username, password_hash
-- `smurfs` -- puuid, pseudo, username, password, soloq/flex rank fields, stats_json, session_saved_at, level
+- `smurfs` -- puuid, pseudo, username/password (AES-256-GCM, `server/utils/crypto.js`), soloq/flex rank fields, stats_json, sort_order, session_key, level
 - `user_preferences` -- stats_period (30/season), stats_queue (soloq/flex/all), tour_completed
 - `friends` -- puuid, pseudo, stats_json, last_updated
 
-Migrations are inline in `initDb()`. The DB file lives at project root (`smurfs.db`) in dev, `%AppData%/Savana/smurfs.db` in production.
+Migrations are inline in `initDb()`. The DB file lives at project root (`smurfs.db`) in dev, `%AppData%/Savana/smurfs.db` in production, and is written atomically (tmp file + rename). The encryption key is `.savana_key` (plaintext) in dev; in production Electron seals it as `.savana_key.sealed` (DPAPI) and passes it to the forked backend via `SAVANA_DB_KEY`.
 
 ## Environment
 
@@ -63,7 +64,7 @@ L'UI suit le système de design documenté dans `docs/DESIGN.md` (tokens dans `s
 
 - **Rank memory**: If Riot API returns unranked but DB has a previous rank, the old rank is kept and displayed as "Last Season"
 - **PUUID correction**: If API returns 404, the app re-resolves PUUID from Riot ID and updates the DB
-- **Session age tracking**: `session_saved_at` column tracks when a Riot session was saved; UI warns if >7 days old
+- **Session age tracking**: the saved session file's mtime gives its age (`get-saved-sessions`); UI warns if >7 days old
 - **Stats caching**: Stats are stored per combination key (`stats_{period}_{queue}`) in `stats_json` JSON column
 - **Frameless window**: Custom titlebar is rendered in Vue (`src/App.vue`), window controls go through IPC
 
