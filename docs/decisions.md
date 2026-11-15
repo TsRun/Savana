@@ -36,3 +36,14 @@
 - **Options envisagées** : export en clair ; export sans identifiants ; identifiants chiffrés avec un mot de passe choisi à l'export.
 - **Choix** : mot de passe obligatoire à l'export (saisi deux fois), redemandé à l'import, avec une nouvelle tentative possible en cas d'erreur. Le reste du fichier (rangs, stats, amis, préférences) reste lisible. Les anciens exports sans mot de passe s'importent toujours.
 - **Effets pour l'utilisateur** : un fichier d'export perdu ou partagé ne révèle plus les identifiants, et il reste utilisable sur une autre machine ou après une réinstallation de Windows. Contrepartie : un mot de passe oublié rend le fichier inimportable.
+
+## 2026-11-15 : découpage des données Riot (rang, stats par mode, cache des parties)
+
+- **Question** : les stats étaient découpées par période (toujours « 30 jours » en dur) et par queue, avec un filtre « All » qui mélangeait ARAM, Arena et normales, un plafond de 20 parties qui faisait de « 30 jours » en réalité « 20 dernières parties », et un modèle différent pour les amis. Chaque actualisation retéléchargeait les mêmes parties.
+- **Besoin exprimé** : voir le rang, et des infos propres au mode choisi, sans mélange.
+- **Options envisagées** :
+  - Rang + KDA / rôle / champions du mode choisi, calculés sur ses dernières parties, avec un cache des parties.
+  - Rang seul : une requête par compte, mais plus de KDA, de rôle ni de champions.
+  - Rang + plus de modes (ARAM, Arena, normales), chacun avec ses stats.
+- **Choix** : rang + KDA / rôle / champions du mode choisi. Le filtre ne propose plus que SoloQ et Flex ; la notion de période disparaît ; les stats portent sur les 20 dernières parties du mode (indiqué au survol de la carte). Les deux modes sont calculés à chaque actualisation, donc changer de filtre est instantané. Les amis suivent exactement le même modèle (mémoire du rang, Riot ID suivi, winrate de la saison comme sur les cartes de comptes).
+- **Effets pour l'utilisateur** : plus de chiffres mélangés entre modes ; une actualisation de 10 comptes passe d'environ 5 minutes à environ 1 minute, car seules les nouvelles parties sont téléchargées ; une erreur de l'API (clé expirée) n'efface plus ni le rang ni les stats. Contrepartie : la première actualisation après la mise à jour télécharge jusqu'à 40 parties par compte (quelques minutes), et les stats ARAM / Arena / normales ne sont plus disponibles.

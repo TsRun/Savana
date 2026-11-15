@@ -1,6 +1,8 @@
 import express from 'express';
 import db from '../models/database.js';
-import { getSummonerLevel, getMatchIds, calculateStats, getRankData, formatRank, getPuuidByRiotId, getRiotIdByPuuid } from '../utils/riotApi.js';
+import { getPuuidByRiotId, getRiotIdByPuuid } from '../utils/riotApi.js';
+import { syncPlayer, normalizeSmurfStats, RANKED_QUEUES } from '../utils/playerSync.js';
+import { registerSyncHandler, enqueueSync, activeSyncIds, queuedSyncIds, currentSyncId } from '../utils/syncQueue.js';
 
 const router = express.Router();
 
@@ -12,18 +14,6 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Non authentifié' });
   }
   next();
-}
-
-const VALID_QUEUES = ['soloq', 'flex', 'all'];
-const VALID_PERIODS = ['30', 'season'];
-
-// Filtres de stats d'une demande : ceux du corps s'ils sont valides, sinon les préférences
-function resolveFilters(userId, body = {}) {
-  const prefs = db.getUserPreferences(userId) || {};
-  return {
-    queue: VALID_QUEUES.includes(body.queue) ? body.queue : (prefs.stats_queue || 'soloq'),
-    period: VALID_PERIODS.includes(String(body.period)) ? String(body.period) : (prefs.stats_period || '30')
-  };
 }
 
 /**
@@ -46,23 +36,16 @@ router.get('/', requireAuth, (req, res) => {
   const userId = req.session.user_id;
   const smurfs = db.getUserSmurfs(userId);
 
-  const prefs = db.getUserPreferences(userId);
-  const period = prefs?.stats_period || '30';
-  const queue = prefs?.stats_queue || 'soloq';
-
-  const dynamicStatsKey = `stats_${period}_${queue}`;
-  const syncingIds = scheduler.activeIds();
+  const queue = db.getUserPreferences(userId).stats_queue;
+  const syncingIds = activeSyncIds('smurf');
 
   const formattedSmurfs = smurfs.map(smurf => {
-    // Stats strictement pour la combinaison (période, queue) demandée.
-    // 'pending' = jamais calculé pour ce filtre ; 'empty' = calculé mais 0 partie.
-    let stats = null;
-    let statsState = 'pending';
-    const statsJson = smurf.stats_json || {};
-    if (Object.prototype.hasOwnProperty.call(statsJson, dynamicStatsKey)) {
-      stats = statsJson[dynamicStatsKey];
-      statsState = stats ? 'ok' : 'empty';
-    }
+    // Stats des dernières parties de la queue choisie (SoloQ ou Flex).
+    // 'pending' = jamais calculées ; 'empty' = calculées mais 0 partie.
+    const statsByQueue = normalizeSmurfStats(smurf.stats_json);
+    const computed = queue in statsByQueue;
+    const stats = computed ? statsByQueue[queue] : null;
+    const statsState = !computed ? 'pending' : (stats ? 'ok' : 'empty');
 
     return {
       PUUID: smurf.puuid,
@@ -87,6 +70,7 @@ router.get('/', requireAuth, (req, res) => {
       Level: smurf.level,
       Stats: stats,
       StatsState: statsState,
+      StatsByQueue: statsByQueue,
       last_updated: smurf.last_updated,
       id: smurf.id,
       SessionKey: smurf.session_key,
@@ -135,8 +119,7 @@ router.post('/', requireAuth, async (req, res) => {
 
   const smurfId = db.addSmurf(userId, puuid, pseudo, username || '', password || '');
 
-  // Prioritize update
-  scheduler.enqueue(smurfId, resolveFilters(userId));
+  enqueueSync('smurf', smurfId);
 
   const smurf = db.getSmurfById(smurfId);
   res.status(201).json({ id: smurf.id, Pseudo: smurf.pseudo, SessionKey: smurf.session_key });
@@ -208,169 +191,61 @@ router.delete('/:id', requireAuth, (req, res) => {
 });
 
 
-// === WORKER / SCHEDULER ===
-// Queue simple pour traiter les smurfs un par un. Chaque élément garde la queue
-// et la période captées à la mise en file (les préférences peuvent changer entre-temps).
-const scheduler = {
-  queue: [],       // { id, queue, period }
-  current: null,   // élément en cours de traitement
-  processing: false,
-  enqueue(smurfId, { queue, period }) {
-    const already = this.queue.some(j => j.id === smurfId && j.queue === queue && j.period === period);
-    if (!already) {
-      this.queue.push({ id: smurfId, queue, period });
-      this.process();
-    }
-  },
-  // Comptes en file ou en cours de mise à jour
-  activeIds() {
-    const ids = new Set(this.queue.map(j => j.id));
-    if (this.current) ids.add(this.current.id);
-    return ids;
-  },
-  async process() {
-    if (this.processing || this.queue.length === 0) return;
-    this.processing = true;
-
-    while (this.queue.length > 0) {
-      const job = this.queue.shift();
-      this.current = job;
-      try {
-        await updateSingleSmurf(job.id, job);
-      } catch (e) { console.error(e); }
-      this.current = null;
-    }
-
-    this.processing = false;
-  }
-};
+// === SYNCHRONISATION ===
 
 /**
- * Mise à jour d'un seul smurf
+ * Mise à jour d'un seul smurf : rang, niveau, Riot ID et stats des deux queues
  */
-async function updateSingleSmurf(smurfId, { queue, period }) {
+async function updateSingleSmurf(smurfId) {
   const smurf = db.getSmurfById(smurfId);
   if (!smurf) return;
 
   console.log(`[UPDATE] ${smurf.pseudo} started...`);
 
-  // Extraire gameName et tagLine
-  let gameName = null;
-  let tagLine = null;
-  if (smurf.pseudo && smurf.pseudo.includes('#')) {
-    const parts = smurf.pseudo.split('#');
-    gameName = parts[0];
-    tagLine = parts[1];
-  }
-
-  let currentPuuid = smurf.puuid;
-
   try {
-    // 1. Level + Tier + Current Riot ID
-    let [levelResult, rankData, currentRiotId] = await Promise.all([
-      getSummonerLevel(currentPuuid, gameName, tagLine),
-      getRankData(currentPuuid),
-      getRiotIdByPuuid(currentPuuid)
-    ]);
+    const result = await syncPlayer({ puuid: smurf.puuid, riotId: smurf.pseudo });
 
-    // If PUUID lookup failed, try to re-resolve from stored Riot ID
-    if (!currentRiotId && gameName && tagLine) {
-      console.log(`   [FIX] PUUID lookup failed, re-resolving from ${gameName}#${tagLine}...`);
-      const newPuuid = await getPuuidByRiotId(gameName, tagLine);
-      if (newPuuid && newPuuid !== currentPuuid) {
-        console.log(`   [FIX] New PUUID found: ${newPuuid} (was ${currentPuuid})`);
-        currentPuuid = newPuuid;
-        db.updateSmurfPuuid(smurfId, currentPuuid);
-        // Re-fetch with corrected PUUID
-        [levelResult, rankData, currentRiotId] = await Promise.all([
-          getSummonerLevel(currentPuuid),
-          getRankData(currentPuuid),
-          getRiotIdByPuuid(currentPuuid)
-        ]);
+    if (result.puuid !== smurf.puuid) {
+      db.updateSmurfPuuid(smurfId, result.puuid);
+    }
+
+    // Un échec API (null) n'efface ni le niveau ni le Riot ID connus
+    const updateData = {};
+    if (result.level) updateData.level = result.level;
+    if (result.riotId && result.riotId !== smurf.pseudo) {
+      console.log(`   [UPDATE] Riot ID changed: ${smurf.pseudo} -> ${result.riotId}`);
+      updateData.pseudo = result.riotId;
+    }
+
+    // Seules les queues réussies remplacent les stats précédentes
+    if (Object.keys(result.stats).length > 0) {
+      updateData.stats_json = { ...normalizeSmurfStats(smurf.stats_json), ...result.stats };
+    }
+
+    // Mémoire du rang : un « unranked » de l'API ne remplace pas un rang connu
+    for (const q of RANKED_QUEUES) {
+      const fresh = result.rank[q];
+      if (fresh.tier) {
+        updateData[`${q}_tier`] = fresh.tier;
+        updateData[`${q}_rank`] = fresh.rank;
+        updateData[`${q}_lp`] = fresh.lp;
+        updateData[`${q}_wins`] = fresh.wins;
+        updateData[`${q}_losses`] = fresh.losses;
+      } else if (smurf[`${q}_tier`]) {
+        console.log(`   [KEEP] On garde le rang ${q} ${smurf[`${q}_tier`]} (Unranked sur l'API)`);
+      } else {
+        updateData[`${q}_tier`] = null;
       }
     }
 
-    if (levelResult.corrected && levelResult.puuid !== currentPuuid) {
-      currentPuuid = levelResult.puuid;
-      db.updateSmurfPuuid(smurfId, currentPuuid);
-    }
-
-    const level = levelResult.level;
-    const { soloq, flex } = formatRank(rankData);
-
-    // 2. Stats pour la queue / période demandées à la mise en file
-    // Une erreur API (clé expirée, 429...) ne doit pas passer pour « 0 partie »
-    let stats = null;
-    let statsFailed = false;
-    try {
-      const matchIds = await getMatchIds(currentPuuid, queue, period);
-      stats = await calculateStats(currentPuuid, matchIds);
-    } catch (e) {
-      statsFailed = true;
-      console.error(`   [KEEP] Stats ${queue}/${period} non mises à jour : ${e.message}`);
-    }
-
-    // 3. Prepare Update
-    // Même mémoire que pour le rang : un échec API (null) n'efface pas le niveau connu
-    const updateData = {};
-    if (level) updateData.level = level;
-
-    // Update Riot ID if changed
-    if (currentRiotId && currentRiotId !== smurf.pseudo) {
-      console.log(`   [UPDATE] Riot ID changed: ${smurf.pseudo} -> ${currentRiotId}`);
-      updateData.pseudo = currentRiotId;
-    }
-
-    // Update Dynamic Stats JSON
-    // (Les colonnes legacy stats_30_ranked/etc. ne sont plus écrites : le mapping
-    // flex->ranked contaminait les stats SoloQ avec des stats Flex et inversement.)
-    let statsJson = {};
-    try {
-      // smurf.stats_json sent by db is string or null
-      statsJson = smurf.stats_json ? JSON.parse(smurf.stats_json) : {};
-    } catch (e) { }
-
-    // Même mémoire que pour le rang : en cas d'échec, les stats précédentes sont gardées
-    if (!statsFailed) {
-      const statsKey = `stats_${period}_${queue}`;
-      statsJson[statsKey] = stats;
-      updateData.stats_json = statsJson;
-    }
-
-    // LOGIQUE DE MEMOIRE DE RANG (Keep existing rank if new is null)
-    if (soloq.tier) {
-      updateData.soloq_tier = soloq.tier;
-      updateData.soloq_rank = soloq.rank;
-      updateData.soloq_lp = soloq.lp;
-      updateData.soloq_wins = soloq.wins;
-      updateData.soloq_losses = soloq.losses;
-    } else if (smurf.soloq_tier) {
-      console.log(`   [KEEP] On garde le rang ${smurf.soloq_tier} (Unranked sur l'API)`);
-    } else {
-      updateData.soloq_tier = null;
-    }
-
-    // Même mémoire de rang pour la Flex
-    if (flex.tier) {
-      updateData.flex_tier = flex.tier;
-      updateData.flex_rank = flex.rank;
-      updateData.flex_lp = flex.lp;
-      updateData.flex_wins = flex.wins;
-      updateData.flex_losses = flex.losses;
-    } else if (smurf.flex_tier) {
-      console.log(`   [KEEP] On garde le rang Flex ${smurf.flex_tier} (Unranked sur l'API)`);
-    } else {
-      updateData.flex_tier = null;
-    }
-
-    // 4. Update DB
     db.updateSmurfData(smurfId, updateData);
-
-    console.log(`[UPDATE] ${smurf.pseudo} completed (${queue}/${period}).`);
+    console.log(`[UPDATE] ${smurf.pseudo} completed.`);
   } catch (err) {
     console.error(`[UPDATE] Error ${smurf.pseudo}: ${err.message}`);
   }
 }
+
+registerSyncHandler('smurf', updateSingleSmurf);
 
 /**
  * POST /api/refresh
@@ -380,27 +255,24 @@ export async function refreshSmurfs(req, res) {
   const userId = req.session?.user_id;
   if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
-  const { force = false } = req.body || {};
-  const filters = resolveFilters(userId, req.body || {});
+  const { force = false, queue } = req.body || {};
+  if (RANKED_QUEUES.includes(queue)) db.updateUserPreferences(userId, undefined, queue);
 
-  db.updateUserPreferences(userId, filters.period, filters.queue);
-
-  // Ajouter tous les smurfs à la queue du scheduler
+  // Mettre tous les comptes en file de synchronisation
   const smurfs = db.getUserSmurfs(userId);
   let queuedCount = 0;
   const now = Date.now();
 
   for (const s of smurfs) {
     if (force || !s.last_updated || (now - new Date(s.last_updated).getTime() > REFRESH_COOLDOWN)) {
-      scheduler.enqueue(s.id, filters);
+      enqueueSync('smurf', s.id);
       queuedCount++;
     }
   }
 
   res.status(202).json({
     status: 'Background update started',
-    queued: queuedCount,
-    filters
+    queued: queuedCount
   });
 }
 
@@ -414,7 +286,8 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'Smurf non trouvé' });
   }
 
-  scheduler.enqueue(smurfId, resolveFilters(req.session.user_id, req.body || {}));
+  // Les deux queues sont toujours calculées : la queue envoyée n'a plus d'effet
+  enqueueSync('smurf', smurfId);
   res.status(202).json({ status: 'Refresh queued' });
 });
 
@@ -424,8 +297,9 @@ router.post('/:id/refresh', requireAuth, async (req, res) => {
  */
 router.get('/refresh-status', requireAuth, (req, res) => {
   const owned = new Set(db.getUserSmurfs(req.session.user_id).map(s => s.id));
-  const queued = [...new Set(scheduler.queue.map(j => j.id))].filter(id => owned.has(id));
-  const current = scheduler.current && owned.has(scheduler.current.id) ? scheduler.current.id : null;
+  const queued = queuedSyncIds('smurf').filter(id => owned.has(id));
+  const cur = currentSyncId('smurf');
+  const current = cur !== null && owned.has(cur) ? cur : null;
   res.json({ queued, current });
 });
 

@@ -15,7 +15,6 @@
         <select v-model="statsFilter" class="select-input">
           <option value="soloq">SoloQ</option>
           <option value="flex">Flex</option>
-          <option value="all">All Modes</option>
         </select>
 
         <button @click="refreshAllFriends" class="btn btn-secondary" title="Rafraîchir les stats de tous les amis pour la queue sélectionnée">Refresh</button>
@@ -115,8 +114,8 @@ const props = defineProps({
   friends: Array,
   smurfs: Array,
   loading: Boolean,
-  // Queue du filtre principal (vue Accounts) : les stats des smurfs sont calculées pour elle
-  smurfsQueue: { type: String, default: 'soloq' }
+  // Queue du filtre principal (vue Accounts), reprise à l'ouverture de la vue
+  defaultQueue: { type: String, default: 'soloq' }
 });
 
 const emit = defineEmits(['open-add', 'delete-friend', 'refresh-friend', 'refresh-smurf']);
@@ -124,25 +123,15 @@ const { apiUrl } = useApi();
 
 const showSmurfs = defineModel('showSmurfs', { default: false });
 
-const statsFilter = ref('soloq');
+const statsFilter = ref(props.defaultQueue === 'flex' ? 'flex' : 'soloq');
 
-// Queue de rang affichée (pour 'all', on garde la SoloQ comme référence)
-const rankQueue = computed(() => statsFilter.value === 'flex' ? 'flex' : 'soloq');
+// Queue de rang affichée : celle du filtre (SoloQ ou Flex)
+const rankQueue = computed(() => statsFilter.value);
 
-// Stats pour la queue sélectionnée (null si pas encore calculées pour cette queue)
+// Stats des dernières parties de la queue sélectionnée (null si pas encore calculées)
 const getStats = (p) => {
-  if (p.type === 'friend') {
-    const sj = p.raw.stats_json;
-    if (!sj) return null;
-    if (sj.stats_by_queue && statsFilter.value in sj.stats_by_queue) {
-      return sj.stats_by_queue[statsFilter.value];
-    }
-    // Données legacy : stats de la dernière queue rafraîchie, uniquement si elle correspond
-    if ((sj.filter?.queue || 'soloq') === statsFilter.value) return sj.stats;
-    return null;
-  }
-  // Smurf : ses stats sont calculées pour la queue du filtre principal
-  return props.smurfsQueue === statsFilter.value ? p.raw.Stats : null;
+  if (p.type === 'friend') return p.raw.stats_json?.stats_by_queue?.[statsFilter.value] ?? null;
+  return p.raw.StatsByQueue?.[statsFilter.value] ?? null;
 };
 
 // Helper to normalize data structure between friend and smurf
@@ -258,7 +247,11 @@ const getTopChamps = (p) => {
   return getStats(p)?.best_champions || [];
 };
 
+// Même source que les cartes de comptes : bilan de la saison du rang, sinon dernières parties
 const getGlobalWr = (p) => {
+  const r = getRankObj(p);
+  const total = (r?.wins || 0) + (r?.losses || 0);
+  if (total > 0) return { winrate: Math.round((r.wins / total) * 100), games: total };
   const stats = getStats(p);
   if (!stats) return null;
   return { winrate: stats.winrate, games: stats.total_games };
@@ -288,8 +281,7 @@ const refreshAllFriends = () => {
 // Au changement de queue, rafraîchir les amis qui n'ont pas encore de stats pour celle-ci
 watch(statsFilter, (newQueue) => {
   (props.friends || []).forEach(f => {
-    const sj = f.stats_json;
-    const hasStats = sj && ((sj.stats_by_queue && newQueue in sj.stats_by_queue) || (sj.filter?.queue || 'soloq') === newQueue);
+    const hasStats = !!f.stats_json?.stats_by_queue && newQueue in f.stats_json.stats_by_queue;
     if (!hasStats) emit('refresh-friend', { id: f.id, queue: newQueue });
   });
 });

@@ -77,7 +77,7 @@
       </div>
 
       <!-- Stats Section -->
-      <div class="stats-section" v-if="smurf.Stats">
+      <div class="stats-section" v-if="smurf.Stats" :title="statsScopeLabel">
         <div class="role-badge" v-if="smurf.Stats.main_role" :title="smurf.Stats.main_role">
           <img :src="getRoleIcon(smurf.Stats.main_role)" :alt="smurf.Stats.main_role" class="role-icon" />
           <span class="role-pct">{{ smurf.Stats.role_percentage }}%</span>
@@ -375,13 +375,8 @@ const rankTier = computed(() => {
 
 const rankLP = computed(() => rankData.value.lp || 0);
 
-// En mode "all", le W/L ranked d'une seule queue n'a pas de sens :
-// on affiche le winrate des stats (toutes queues). Sinon, W/L de la
-// queue ranked affichée (saison), avec repli sur les stats.
+// W/L de la queue ranked affichée (saison), avec repli sur les dernières parties
 const winrate = computed(() => {
-  if (props.queueFilter === 'all' && props.smurf.Stats?.total_games > 0) {
-    return props.smurf.Stats.winrate || 0;
-  }
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
   const rankedTotal = wins + losses;
@@ -391,9 +386,6 @@ const winrate = computed(() => {
 });
 
 const rankedGames = computed(() => {
-  if (props.queueFilter === 'all' && props.smurf.Stats?.total_games > 0) {
-    return props.smurf.Stats.total_games;
-  }
   const wins = rankData.value.wins || 0;
   const losses = rankData.value.losses || 0;
   const rankedTotal = wins + losses;
@@ -418,7 +410,13 @@ const kdaClass = computed(() => {
   return 'kda-poor';
 });
 
-const QUEUE_LABELS = { soloq: 'SoloQ', flex: 'Flex', all: '' };
+const QUEUE_LABELS = { soloq: 'SoloQ', flex: 'Flex' };
+// Parties analysées par queue (RECENT_MATCH_COUNT côté backend)
+const RECENT_GAMES = 20;
+
+const statsScopeLabel = computed(() =>
+  `KDA, role and champions over the last ${RECENT_GAMES} ${QUEUE_LABELS[props.queueFilter] || 'ranked'} games`
+);
 
 const noStatsLabel = computed(() => {
   if (props.smurf.StatsState === 'pending') return 'Stats pending…';

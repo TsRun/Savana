@@ -1,7 +1,8 @@
-
 import express from 'express';
 import db from '../models/database.js';
-import { getPuuidByRiotId, getRankData, formatRank, getMatchIds, calculateStats, getSummonerLevel } from '../utils/riotApi.js';
+import { getPuuidByRiotId } from '../utils/riotApi.js';
+import { syncPlayer, normalizeFriendStats, mergeRank } from '../utils/playerSync.js';
+import { registerSyncHandler, enqueueSync, activeSyncIds } from '../utils/syncQueue.js';
 
 const router = express.Router();
 
@@ -14,16 +15,17 @@ function requireAuth(req, res, next) {
 
 /**
  * GET /api/friends
- * Returns list of friends with cached stats
+ * Amis avec leurs données en cache : { soloq, flex, stats_by_queue: { soloq?, flex? } }
  */
 router.get('/', requireAuth, (req, res) => {
-    const friends = db.getUserFriends(req.session.user_id);
+    const friends = db.getUserFriends(req.session.user_id)
+        .map(f => ({ ...f, stats_json: normalizeFriendStats(f.stats_json) }));
     res.json(friends);
 });
 
 /**
  * POST /api/friends
- * Add a new friend by Riot ID. Auto-fetches initial stats.
+ * Ajoute un ami par Riot ID et lance sa première synchronisation.
  */
 router.post('/', requireAuth, async (req, res) => {
     const userId = req.session.user_id;
@@ -41,11 +43,8 @@ router.post('/', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Joueur introuvable' });
         }
 
-        // Add to DB
         const friendId = db.addFriend(userId, puuid, riotId);
-
-        // Trigger initial refresh
-        refreshFriendStats(friendId, puuid).catch(console.error);
+        enqueueSync('friend', friendId);
 
         res.status(201).json({ id: friendId, pseudo: riotId, puuid, stats_json: null });
     } catch (e) {
@@ -64,85 +63,53 @@ router.delete('/:id', requireAuth, (req, res) => {
 
 /**
  * POST /api/friends/:id/refresh
+ * Les deux queues sont toujours calculées : la queue éventuellement envoyée est ignorée.
  */
-// ...
-router.post('/:id/refresh', requireAuth, async (req, res) => {
-    const friendId = req.params.id;
-    const { queue = 'soloq', period = '30' } = req.body;
-
-    // We need the PUUID (la recherche dans les amis de l'utilisateur vérifie aussi la propriété)
-    const friends = db.getUserFriends(req.session.user_id);
-    const friend = friends.find(f => f.id == friendId);
-
+router.post('/:id/refresh', requireAuth, (req, res) => {
+    const friendId = Number(req.params.id);
+    // La recherche dans les amis de l'utilisateur vérifie aussi la propriété
+    const friend = db.getUserFriends(req.session.user_id).find(f => f.id === friendId);
     if (!friend) return res.status(404).json({ error: 'Ami non trouvé' });
 
-    refreshFriendStats(friendId, friend.puuid, queue, period, friend.stats_json).catch(console.error);
+    enqueueSync('friend', friendId);
     res.json({ status: 'Refresh queued' });
 });
 
 /**
  * GET /api/friends/refresh-status
- * Amis dont une actualisation est en cours (suivi côté UI)
+ * Amis en file ou en cours de synchronisation (suivi côté UI)
  */
 router.get('/refresh-status', requireAuth, (req, res) => {
-    const owned = db.getUserFriends(req.session.user_id).map(f => f.id);
-    res.json({ refreshing: owned.filter(id => inFlight.has(Number(id))) });
+    const active = activeSyncIds('friend');
+    const owned = db.getUserFriends(req.session.user_id).map(f => Number(f.id));
+    res.json({ refreshing: owned.filter(id => active.has(id)) });
 });
 
-// Actualisations en vol par ami (compteur : plusieurs queues peuvent se chevaucher)
-const inFlight = new Map();
-
 /**
- * Helper to refresh stats (Rank + Main Role + Main Champs)
- * Les stats sont stockées par queue dans stats_by_queue pour ne pas
- * écraser celles des autres queues.
+ * Synchronisation d'un ami : mêmes règles que pour les comptes (mémoire du rang,
+ * correction du PUUID, Riot ID suivi, stats gardées en cas d'erreur API).
  */
-async function refreshFriendStats(friendId, puuid, queue = 'soloq', period = '30', existingStatsJson = null) {
-    const key = Number(friendId);
-    inFlight.set(key, (inFlight.get(key) || 0) + 1);
-    try {
-        await doRefreshFriendStats(friendId, puuid, queue, period, existingStatsJson);
-    } finally {
-        const left = inFlight.get(key) - 1;
-        if (left > 0) inFlight.set(key, left); else inFlight.delete(key);
-    }
+async function refreshFriend(friendId) {
+    const friend = db.getFriendById(friendId);
+    if (!friend) return;
+
+    console.log(`[FRIENDS] Refreshing ${friend.pseudo}...`);
+    const result = await syncPlayer({ puuid: friend.puuid, riotId: friend.pseudo, withLevel: false });
+    const prev = normalizeFriendStats(friend.stats_json) || { soloq: null, flex: null, stats_by_queue: {} };
+
+    const identity = {};
+    if (result.puuid !== friend.puuid) identity.puuid = result.puuid;
+    if (result.riotId && result.riotId !== friend.pseudo) identity.pseudo = result.riotId;
+    if (Object.keys(identity).length > 0) db.updateFriendIdentity(friendId, identity);
+
+    db.updateFriendData(friendId, {
+        soloq: mergeRank(result.rank.soloq, prev.soloq),
+        flex: mergeRank(result.rank.flex, prev.flex),
+        stats_by_queue: { ...prev.stats_by_queue, ...result.stats }
+    });
+    console.log(`[FRIENDS] Refreshed ${result.riotId || friend.pseudo}`);
 }
 
-async function doRefreshFriendStats(friendId, puuid, queue, period, existingStatsJson) {
-    console.log(`[FRIENDS] Refreshing ${friendId} (Queue: ${queue})...`);
-    try {
-        // 1. Rank (Always fetch rank data regardless of queue, used for badge)
-        const rankData = await getRankData(puuid);
-        const { soloq, flex } = formatRank(rankData);
-
-        // 2. Stats (Filtered by Queue). Une erreur API garde les stats précédentes.
-        const prev = existingStatsJson || {};
-        const statsByQueue = { ...(prev.stats_by_queue || {}) };
-        let stats_calc = null;
-        let statsFailed = false;
-        try {
-            const matchIds = await getMatchIds(puuid, queue, period);
-            stats_calc = await calculateStats(puuid, matchIds);
-            statsByQueue[queue] = stats_calc;
-        } catch (e) {
-            statsFailed = true;
-            console.error(`[FRIENDS] Stats ${queue} non mises à jour pour ${friendId} : ${e.message}`);
-        }
-
-        const stats = {
-            soloq,
-            flex,
-            // dernière queue rafraîchie (compat)
-            stats: statsFailed ? (prev.stats ?? null) : stats_calc,
-            stats_by_queue: statsByQueue,    // stats par queue
-            filter: statsFailed ? (prev.filter ?? { queue, period }) : { queue, period }
-        };
-
-        db.updateFriendData(friendId, stats);
-        console.log(`[FRIENDS] Refreshed ${friendId}`);
-    } catch (e) {
-        console.error(`[FRIENDS] Failed refresh ${friendId}:`, e);
-    }
-}
+registerSyncHandler('friend', refreshFriend);
 
 export default router;

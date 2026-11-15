@@ -139,9 +139,30 @@ export async function initDb() {
     )
   `);
 
+  // Cache des parties classées : une ligne par (match, joueur suivi), réduite à ce
+  // qui sert aux stats. Un match terminé ne change plus : on ne le télécharge qu'une fois.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS match_cache (
+      match_id TEXT NOT NULL,
+      puuid TEXT NOT NULL,
+      queue_id INTEGER NOT NULL,
+      game_start INTEGER DEFAULT 0,
+      champion TEXT DEFAULT '',
+      kills INTEGER DEFAULT 0,
+      deaths INTEGER DEFAULT 0,
+      assists INTEGER DEFAULT 0,
+      win INTEGER DEFAULT 0,
+      position TEXT DEFAULT '',
+      remake INTEGER DEFAULT 0,
+      PRIMARY KEY (match_id, puuid)
+    )
+  `);
+
   // Index pour performance
   db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_user ON smurfs(user_id)');
   db.run('CREATE INDEX IF NOT EXISTS idx_smurfs_puuid ON smurfs(puuid)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_match_cache_player ON match_cache(puuid, queue_id)');
+  pruneOrphanMatches();
 
   // Migration: Ajouter la colonne tour_completed si elle n'existe pas
   try {
@@ -499,6 +520,7 @@ export function updateSmurfData(smurfId, data) {
 export function deleteSmurf(smurfId, userId) {
   db.run('DELETE FROM smurfs WHERE id = ? AND user_id = ?', [smurfId, userId]);
   const changes = db.getRowsModified();
+  pruneOrphanMatches();
   saveDatabase();
   return changes > 0;
 }
@@ -559,7 +581,8 @@ export function getUserPreferences(userId) {
     });
     // Ensure defaults
     if (!prefs.stats_period) prefs.stats_period = '30';
-    if (!prefs.stats_queue) prefs.stats_queue = 'soloq';
+    // « all » (toutes queues mélangées) n'existe plus : seules SoloQ et Flex sont suivies
+    if (!['soloq', 'flex'].includes(prefs.stats_queue)) prefs.stats_queue = 'soloq';
     if (prefs.tour_completed === undefined || prefs.tour_completed === null) prefs.tour_completed = 0;
 
     return prefs;
@@ -618,6 +641,7 @@ export function getUserFriends(userId) {
 export function deleteFriend(friendId, userId) {
   db.run('DELETE FROM friends WHERE id = ? AND user_id = ?', [friendId, userId]);
   const changes = db.getRowsModified();
+  pruneOrphanMatches();
   saveDatabase();
   return changes > 0;
 }
@@ -629,6 +653,78 @@ export function updateFriendData(friendId, stats) {
     WHERE id = ?
   `, [JSON.stringify(stats), friendId]);
   saveDatabase();
+}
+
+export function getFriendById(friendId) {
+  const result = db.exec('SELECT * FROM friends WHERE id = ?', [friendId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const friend = {};
+  result[0].columns.forEach((col, i) => friend[col] = result[0].values[0][i]);
+  return friend;
+}
+
+// PUUID corrigé ou Riot ID changé côté Riot
+export function updateFriendIdentity(friendId, { puuid, pseudo }) {
+  if (puuid !== undefined) db.run('UPDATE friends SET puuid = ? WHERE id = ?', [puuid, friendId]);
+  if (pseudo !== undefined) db.run('UPDATE friends SET pseudo = ? WHERE id = ?', [pseudo, friendId]);
+  saveDatabase();
+}
+
+// === CACHE DES PARTIES ===
+
+/**
+ * Parties en cache d'un joueur parmi les ids donnés
+ */
+export function getCachedMatchRows(puuid, matchIds) {
+  if (!matchIds || matchIds.length === 0) return [];
+  const placeholders = matchIds.map(() => '?').join(',');
+  const result = db.exec(
+    `SELECT * FROM match_cache WHERE puuid = ? AND match_id IN (${placeholders})`,
+    [puuid, ...matchIds]
+  );
+  if (result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map(row => {
+    const r = {};
+    columns.forEach((col, i) => r[col] = row[i]);
+    return r;
+  });
+}
+
+/**
+ * Enregistre les nouvelles parties d'un joueur pour une queue et oublie celles qui
+ * ne font plus partie de ses dernières parties (keepIds). Une seule écriture disque.
+ */
+export function saveRecentMatches(puuid, queueId, keepIds, newRows) {
+  for (const r of newRows) {
+    db.run(
+      `INSERT OR REPLACE INTO match_cache
+        (match_id, puuid, queue_id, game_start, champion, kills, deaths, assists, win, position, remake)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [r.match_id, puuid, r.queue_id, r.game_start, r.champion, r.kills, r.deaths, r.assists, r.win, r.position, r.remake]
+    );
+  }
+  if (keepIds.length > 0) {
+    const placeholders = keepIds.map(() => '?').join(',');
+    db.run(
+      `DELETE FROM match_cache WHERE puuid = ? AND queue_id = ? AND match_id NOT IN (${placeholders})`,
+      [puuid, queueId, ...keepIds]
+    );
+  } else {
+    db.run('DELETE FROM match_cache WHERE puuid = ? AND queue_id = ?', [puuid, queueId]);
+  }
+  saveDatabase();
+}
+
+/**
+ * Supprime les parties des joueurs qui ne sont plus suivis (compte ou ami supprimé,
+ * PUUID corrigé). L'appelant sauvegarde.
+ */
+function pruneOrphanMatches() {
+  db.run(`
+    DELETE FROM match_cache
+    WHERE puuid NOT IN (SELECT puuid FROM smurfs UNION SELECT puuid FROM friends)
+  `);
 }
 
 export function resetAllSmurfData() {
@@ -827,6 +923,11 @@ export default {
   exportUserData,
   importUserData,
   // Friends
+  getFriendById,
+  updateFriendIdentity,
+  // Cache des parties
+  getCachedMatchRows,
+  saveRecentMatches,
   addFriend,
   getUserFriends,
   deleteFriend,

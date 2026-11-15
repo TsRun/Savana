@@ -124,75 +124,38 @@ export async function getPuuidByRiotId(gameName, tagLine) {
   }
 }
 
-export async function getSummonerLevel(puuid, gameName = null, tagLine = null) {
+export async function getSummonerLevel(puuid) {
   try {
     const url = `https://${REGION_HOST}/lol/summoner/v4/summoners/by-puuid/${puuid}`;
     const response = await safeRequest(url);
-    return { level: response.data.summonerLevel || null, puuid };
+    return response.data?.summonerLevel || null;
   } catch (err) {
-    // Retry logic if 400/404 AND we have RiotID
-    if ((err.response?.status === 400 || err.response?.status === 404) && gameName && tagLine) {
-      console.log(`   [API] PUUID suspect, tentative correction via ${gameName}#${tagLine}...`);
-      const newPuuid = await getPuuidByRiotId(gameName, tagLine);
-      if (newPuuid && newPuuid !== puuid) {
-        try {
-          const url2 = `https://${REGION_HOST}/lol/summoner/v4/summoners/by-puuid/${newPuuid}`;
-          const response2 = await safeRequest(url2);
-          return { level: response2.data.summonerLevel || null, puuid: newPuuid, corrected: true };
-        } catch (e) { /* ignore */ }
-      }
-    }
-    return { level: null, puuid };
+    return null;
   }
 }
 
-// Queue IDs Mapping
-const QUEUE_IDS = {
-  'soloq': 420,    // Ranked Solo/Duo
-  'ranked': 420,   // Alias for backward compat
-  'flex': 440,
-  'aram': 450,
-  'arena': 1700,
-  'normal': 400,
-  'quickplay': 490
+// Queues suivies. Les modes ne sont jamais mélangés (pas d'ARAM, d'Arena ni de normales).
+export const QUEUE_IDS = {
+  soloq: 420, // Ranked Solo/Duo
+  flex: 440   // Ranked Flex
 };
 
-export async function getMatchIds(puuid, queueType = 'ranked', period = '30') {
+// Nombre de parties récentes analysées par queue
+export const RECENT_MATCH_COUNT = 20;
+
+/**
+ * Ids des dernières parties d'une queue, les plus récentes d'abord.
+ * Une erreur API est propagée : [] signifie uniquement « aucune partie ».
+ */
+export async function getMatchIds(puuid, queueKey, count = RECENT_MATCH_COUNT) {
+  const queue = QUEUE_IDS[queueKey];
+  if (!queue) throw new Error(`Queue inconnue : ${queueKey}`);
   const url = `https://${ROUTING_VALUE}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids`;
-
-  const currentTime = Math.floor(Date.now() / 1000);
-  let startTime;
-
-  if (period === '30') {
-    startTime = currentTime - (30 * 24 * 60 * 60);
-  } else if (period === 'season') {
-    // Début de saison ~8 janvier de l'année en cours (année précédente si on est avant)
-    const now = new Date();
-    let seasonStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 8));
-    if (now < seasonStart) seasonStart = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 8));
-    startTime = Math.floor(seasonStart.getTime() / 1000);
-  } else {
-    // 'all' or fallback: look back 6 months
-    startTime = currentTime - (180 * 24 * 60 * 60);
-  }
-
-  // LIMITATION: On ne récupère que les 20 derniers matchs MAX pour économiser les requêtes
-  const count = 20;
-
-  const params = { start: 0, count, startTime };
-
-  if (queueType !== 'all' && QUEUE_IDS[queueType]) {
-    params.queue = QUEUE_IDS[queueType];
-  }
-
-  // Une erreur API est propagée : [] signifie uniquement « aucune partie »
   try {
-    const response = await safeRequest(url, { params });
-    const matches = response.data || [];
-    console.log(`   [API] Matchs récupérés: ${matches.length} (${period}/${queueType})`);
-    return matches;
+    const response = await safeRequest(url, { params: { start: 0, count, queue } });
+    return response.data || [];
   } catch (err) {
-    console.error(`   [API] Erreur MatchIds: ${err.message}`);
+    console.error(`   [API] Erreur MatchIds (${queueKey}): ${err.message}`);
     throw err;
   }
 }
@@ -207,66 +170,63 @@ export async function getMatchDetails(matchId) {
   }
 }
 
-// Function helper pour batcher (bien que notre RateLimiter serialise déjà tout)
-async function getMatchDetailsBatch(matchIds) {
-  const results = [];
-  // On traite séquentiellement pour ne pas bourrer la queue du RateLimiter
-  for (const id of matchIds) {
-    const detail = await getMatchDetails(id);
-    if (detail) results.push(detail);
-  }
-  return results;
+/**
+ * Ligne de cache d'un joueur dans un match : uniquement ce qui sert aux stats.
+ * null si le joueur n'y figure pas.
+ */
+export function extractMatchRow(match, puuid, matchId) {
+  const info = match?.info;
+  const p = info?.participants?.find(x => x.puuid === puuid);
+  if (!p) return null;
+
+  let position = p.teamPosition || '';
+  if (position === 'UTILITY') position = 'SUPPORT';
+  if (position === 'UNKNOWN') position = '';
+
+  return {
+    match_id: matchId || match.metadata?.matchId,
+    queue_id: info.queueId,
+    game_start: info.gameStartTimestamp || info.gameCreation || 0,
+    champion: p.championName || '',
+    kills: p.kills || 0,
+    deaths: p.deaths || 0,
+    assists: p.assists || 0,
+    win: p.win ? 1 : 0,
+    position,
+    // Remake : abandon anticipé ou partie de moins de 5 min, exclue des stats
+    remake: (p.gameEndedInEarlySurrender || (info.gameDuration || 0) < 300) ? 1 : 0
+  };
 }
 
 /**
- * Stats sur les matchs donnés. Renvoie null si aucune partie comptée (vrai « 0 partie »).
- * Lève une erreur si plus de la moitié des détails de match n'a pas pu être chargée :
- * l'appelant garde alors les stats précédentes au lieu de les écraser.
+ * Stats sur des parties en cache. Renvoie null si aucune partie comptée (vrai « 0 partie »).
  */
-export async function calculateStats(puuid, matchIds) {
-  if (!matchIds || matchIds.length === 0) return null;
-
-  console.log(`   [API] Analyse de ${matchIds.length} matchs... (Est: ${matchIds.length * 1.25}s)`);
-
-  const matches = await getMatchDetailsBatch(matchIds);
-  const failed = matchIds.length - matches.length;
-  if (failed * 2 > matchIds.length) {
-    throw new Error(`Détails de match indisponibles (${failed}/${matchIds.length} en échec)`);
-  }
-
+export function computeStats(rows) {
   let totalKills = 0, totalDeaths = 0, totalAssists = 0, wins = 0, gamesCount = 0;
   const roles = {};
   const champions = {};
 
-  for (const data of matches) {
-    const participant = data.info?.participants?.find(p => p.puuid === puuid);
-    if (!participant) continue;
-
-    // Exclure les remakes (early surrender ou partie < 5 min)
-    if (participant.gameEndedInEarlySurrender || (data.info?.gameDuration || 0) < 300) continue;
+  for (const r of rows || []) {
+    if (r.remake) continue;
 
     gamesCount++;
-    totalKills += participant.kills || 0;
-    totalDeaths += participant.deaths || 0;
-    totalAssists += participant.assists || 0;
-    if (participant.win) wins++;
+    totalKills += r.kills || 0;
+    totalDeaths += r.deaths || 0;
+    totalAssists += r.assists || 0;
+    if (r.win) wins++;
 
-    let role = participant.teamPosition || 'UNKNOWN';
-    if (role === 'UTILITY') role = 'SUPPORT';
-    if (role && role !== 'UNKNOWN' && role !== '') {
-      roles[role] = (roles[role] || 0) + 1;
-    }
+    if (r.position) roles[r.position] = (roles[r.position] || 0) + 1;
 
-    const champName = participant.championName;
-    if (champName) {
-      if (!champions[champName]) {
-        champions[champName] = { wins: 0, games: 0, kills: 0, deaths: 0, assists: 0 };
+    if (r.champion) {
+      if (!champions[r.champion]) {
+        champions[r.champion] = { wins: 0, games: 0, kills: 0, deaths: 0, assists: 0 };
       }
-      champions[champName].games++;
-      if (participant.win) champions[champName].wins++;
-      champions[champName].kills += participant.kills || 0;
-      champions[champName].deaths += participant.deaths || 0;
-      champions[champName].assists += participant.assists || 0;
+      const c = champions[r.champion];
+      c.games++;
+      if (r.win) c.wins++;
+      c.kills += r.kills || 0;
+      c.deaths += r.deaths || 0;
+      c.assists += r.assists || 0;
     }
   }
 
@@ -277,10 +237,10 @@ export async function calculateStats(puuid, matchIds) {
 
   let mainRole = 'FILL';
   if (Object.keys(roles).length > 0) {
-    mainRole = Object.keys(roles).reduce((a, b) => roles[a] > roles[b] ? a : b, 'FILL');
+    mainRole = Object.keys(roles).reduce((a, b) => roles[a] > roles[b] ? a : b);
   }
   const roleCount = roles[mainRole] || 0;
-  const rolePercentage = gamesCount > 0 ? Math.round((roleCount / gamesCount) * 100) : 0;
+  const rolePercentage = Math.round((roleCount / gamesCount) * 100);
 
   const champArray = Object.entries(champions).map(([name, data]) => ({
     name,
@@ -292,22 +252,11 @@ export async function calculateStats(puuid, matchIds) {
 
   champArray.sort((a, b) => b.games - a.games);
 
-  // Logic "Main Champions" (Rule: 2x games to stand out)
-  let bestChamps = [];
-  if (champArray.length > 0) {
-    bestChamps.push(champArray[0]);
-    if (champArray.length > 1) {
-      // If #1 has < 2x games of #2, show #2 as well
-      if (champArray[0].games < (2 * champArray[1].games)) {
-        bestChamps.push(champArray[1]);
-        if (champArray.length > 2) {
-          // If #2 has < 2x games of #3, show #3 as well
-          if (champArray[1].games < (2 * champArray[2].games)) {
-            bestChamps.push(champArray[2]);
-          }
-        }
-      }
-    }
+  // Champions principaux : le suivant n'est affiché que si le précédent n'a pas 2x plus de parties
+  const bestChamps = [];
+  for (let i = 0; i < Math.min(3, champArray.length); i++) {
+    if (i > 0 && champArray[i - 1].games >= 2 * champArray[i].games) break;
+    bestChamps.push(champArray[i]);
   }
 
   return {
@@ -323,8 +272,6 @@ export async function calculateStats(puuid, matchIds) {
     role_percentage: rolePercentage,
     best_champions: bestChamps
   };
-
-
 }
 
 export async function getRankData(puuid) {
@@ -375,7 +322,8 @@ export default {
   getSummonerLevel,
   getMatchIds,
   getMatchDetails,
-  calculateStats,
+  extractMatchRow,
+  computeStats,
   getRankData,
   formatRank
 };

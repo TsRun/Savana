@@ -91,7 +91,6 @@
               <select v-model="statsQueue" class="select-input" style="width: 120px;" title="Filter Stats by Queue">
                   <option value="soloq">SoloQ</option>
                   <option value="flex">Flex</option>
-                  <option value="all">All</option>
               </select>
             </div>
             <button v-if="updateInfo?.status === 'ready'" @click="installUpdate" class="btn btn-primary" title="Redémarrer l'application pour installer la mise à jour">
@@ -164,7 +163,7 @@
         <FriendsView
           :friends="friends"
           :smurfs="smurfs"
-          :smurfsQueue="statsQueue"
+          :defaultQueue="statsQueue"
           v-model:showSmurfs="showSmurfsInFriends"
           :loading="loadingFriends"
           @open-add="showAddFriendModal = true"
@@ -575,6 +574,8 @@ const checkAuth = async () => {
     if (res.ok) {
       const data = await res.json();
       currentUser.value = { ...data.user, preferences: data.preferences };
+      // Le filtre reprend la queue enregistrée, sinon l'affichage et les stats renvoyées divergent
+      if (['soloq', 'flex'].includes(data.preferences?.stats_queue)) statsQueue.value = data.preferences.stats_queue;
       isAuthenticated.value = true;
       await fetchSmurfs();
       await fetchFriends();
@@ -904,7 +905,7 @@ const refreshElo = async (force = false) => {
   refreshing.value = true;
   if (!alreadyTracking) showToast(force ? 'Mise à jour complète...' : 'Refreshing...', 'info');
   try {
-    const res = await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ period: '30', queue: statsQueue.value, force }) });
+    const res = await fetch(apiUrl.value + '/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ queue: statsQueue.value, force }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (alreadyTracking) return;
     const { timedOut } = await waitForRefresh();

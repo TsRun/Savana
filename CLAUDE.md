@@ -31,7 +31,8 @@ Three processes work together:
 
 - Frontend calls `/api/*` endpoints
 - Backend queries Riot API (rate-limited at 1.25s/request in `server/utils/riotApi.js`) and persists to SQLite
-- Smurf rank/stat updates are processed via a FIFO scheduler queue in `server/routes/smurfs.js`
+- Account and friend syncs share one FIFO queue (`server/utils/syncQueue.js`, state exposed by `GET /api/smurfs/refresh-status` and `/api/friends/refresh-status`). `server/utils/playerSync.js` fetches rank (league-v4, season W/L), level, current Riot ID and, separately for SoloQ (420) and Flex (440), KDA/role/champions over the last 20 games. Other modes (ARAM, Arena, normals) are never fetched
+- Match details are cached in `match_cache` (one row per match and tracked player, stats fields only): a refresh only downloads new games, and rows leaving the last 20 or belonging to deleted players are pruned
 - Riot Client sessions are YAML files saved to `{userData}/sessions/{session_key}/RiotGamesPrivateSettings.yaml.enc`, encrypted with Electron `safeStorage` (DPAPI). `session_key` is a random per-account key in the DB (never the pseudo, never the id: dev and prod share the sessions folder but not the DB). Legacy pseudo-named folders are migrated by `migrate-sessions` (packaged app only)
 - `GET /api/smurfs` never returns passwords (`HasPassword` flag only); credentials are fetched per account via `GET /api/smurfs/:id/credentials`
 
@@ -44,8 +45,9 @@ Three processes work together:
 SQLite via sql.js (`server/models/database.js`). Tables:
 - `users` -- id, username, password_hash
 - `smurfs` -- puuid, pseudo, username/password (AES-256-GCM, `server/utils/crypto.js`), soloq/flex rank fields, stats_json, sort_order, session_key, level
-- `user_preferences` -- stats_period (30/season), stats_queue (soloq/flex/all), tour_completed
-- `friends` -- puuid, pseudo, stats_json, last_updated
+- `user_preferences` -- stats_queue (soloq/flex; legacy `all` reads as soloq), tour_completed, stats_period (unused)
+- `friends` -- puuid, pseudo, stats_json (`{ soloq, flex, stats_by_queue }`), last_updated
+- `match_cache` -- match_id + puuid (PK), queue_id, champion, kills/deaths/assists, win, position, remake
 
 Migrations are inline in `initDb()`. The DB file lives at project root (`smurfs.db`) in dev, `%AppData%/Savana/smurfs.db` in production, and is written atomically (tmp file + rename). The encryption key is `.savana_key` (plaintext) in dev; in production Electron seals it as `.savana_key.sealed` (DPAPI) and passes it to the forked backend via `SAVANA_DB_KEY`. The in-app Riot API key (`.riot_api_key`) is encrypted with that same key. Exports (`POST /api/data/export`, format v2) put Riot credentials in a `secrets` blob encrypted with a user password (scrypt + AES-256-GCM); import asks for it, v1 plaintext exports still import.
 
@@ -65,7 +67,8 @@ L'UI suit le système de design documenté dans `docs/DESIGN.md` (tokens dans `s
 - **Rank memory**: If Riot API returns unranked but DB has a previous rank, the old rank is kept and displayed as "Last Season"
 - **PUUID correction**: If API returns 404, the app re-resolves PUUID from Riot ID and updates the DB
 - **Session age tracking**: the saved session file's mtime gives its age (`get-saved-sessions`); UI warns if >7 days old
-- **Stats caching**: Stats are stored per combination key (`stats_{period}_{queue}`) in `stats_json` JSON column
+- **Stats per queue**: smurf `stats_json` is `{ soloq, flex }` (missing key = never computed, `null` = no games). Legacy shapes (`stats_30_soloq`, friend `stats`/`filter`) are normalized at read time by `normalizeSmurfStats` / `normalizeFriendStats`
+- **API errors never erase data**: a failed queue keeps its previous stats, an unranked/failed league call keeps the previous rank (accounts and friends alike)
 - **Frameless window**: Custom titlebar is rendered in Vue (`src/App.vue`), window controls go through IPC
 
 ## Build output
