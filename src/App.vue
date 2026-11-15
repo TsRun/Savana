@@ -604,8 +604,34 @@ const installUpdate = () => {
 const importFileInput = ref(null);
 
 const exportData = async () => {
+  // Mot de passe qui chiffre les identifiants dans le fichier exporté
+  let password = null;
+  let message = "Choisis un mot de passe pour protéger les identifiants des comptes dans le fichier.\nIl sera demandé à l'import : sans lui, les identifiants ne pourront pas être récupérés.";
+  while (password === null) {
+    const { action, data } = await showConfirm({
+      title: 'Exporter les données',
+      message,
+      confirmText: 'Exporter',
+      cancelText: 'Annuler',
+      inputs: [
+        { key: 'password', label: 'Mot de passe', type: 'password', placeholder: 'Mot de passe', value: '' },
+        { key: 'confirm', label: 'Confirmation', type: 'password', placeholder: 'Retape le mot de passe', value: '' }
+      ],
+      type: 'info'
+    });
+    if (action !== 'confirm') return;
+    if (!data?.password) message = 'Le mot de passe est obligatoire.';
+    else if (data.password !== data.confirm) message = 'Les deux mots de passe ne correspondent pas.';
+    else password = data.password;
+  }
+
   try {
-    const res = await fetch(apiUrl.value + '/data/export', { credentials: 'include' });
+    const res = await fetch(apiUrl.value + '/data/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ password })
+    });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -629,23 +655,40 @@ const handleImportFile = async (e) => {
 
   try {
     const data = JSON.parse(await file.text());
-    const confirmed = await showConfirm({
-      title: 'Importer les données',
-      message: `Importer ${data.smurfs?.length || 0} compte(s) et ${data.friends?.length || 0} ami(s) ?\nLes comptes existants (même PUUID) seront mis à jour.`,
-      confirmText: 'Importer',
-      cancelText: 'Annuler',
-      type: 'warning'
-    });
-    if (confirmed.action !== 'confirm') return;
+    const isProtected = !!data.secrets;
+    const summary = `Importer ${data.smurfs?.length || 0} compte(s) et ${data.friends?.length || 0} ami(s) ?\nLes comptes existants (même PUUID) seront mis à jour.`;
+    let message = isProtected ? `${summary}\nSaisis le mot de passe choisi à l'export.` : summary;
 
-    const res = await fetch(apiUrl.value + '/data/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(data)
-    });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Import failed');
+    let result = null;
+    while (!result) {
+      const confirmed = await showConfirm({
+        title: 'Importer les données',
+        message,
+        confirmText: 'Importer',
+        cancelText: 'Annuler',
+        inputs: isProtected
+          ? [{ key: 'password', label: 'Mot de passe', type: 'password', placeholder: "Mot de passe de l'export", value: '' }]
+          : [],
+        type: 'warning'
+      });
+      if (confirmed.action !== 'confirm') return;
+
+      const res = await fetch(apiUrl.value + '/data/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ data, password: confirmed.data?.password || '' })
+      });
+      const body = await res.json();
+      if (res.ok) {
+        result = body;
+      } else if (body.code === 'BAD_PASSWORD' || body.code === 'PASSWORD_REQUIRED') {
+        // Mauvais mot de passe : on redemande au lieu d'abandonner l'import
+        message = `${summary}\n${body.error}, réessaie.`;
+      } else {
+        throw new Error(body.error || 'Import failed');
+      }
+    }
 
     showToast(`Import terminé : ${result.smurfs} compte(s), ${result.friends} ami(s)`, 'success');
     await fetchSmurfs();

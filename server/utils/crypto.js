@@ -92,4 +92,48 @@ export function decrypt(value) {
   }
 }
 
-export default { encrypt, decrypt, isEncrypted };
+// === Chiffrement par mot de passe (fichiers d'export portables) ===
+// Indépendant de la clé locale : un export se relit sur une autre machine avec
+// le seul mot de passe choisi à l'export. scrypt + AES-256-GCM.
+const SCRYPT_N = 1 << 15;
+const SCRYPT_OPTS = { N: SCRYPT_N, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+
+function passwordError(message, code) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+export function encryptWithPassword(plaintext, password) {
+  if (!password) throw passwordError('Mot de passe requis', 'PASSWORD_REQUIRED');
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(String(password), salt, 32, SCRYPT_OPTS);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  return {
+    kdf: 'scrypt', N: SCRYPT_N, r: 8, p: 1,
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: ct.toString('base64')
+  };
+}
+
+export function decryptWithPassword(blob, password) {
+  if (!password) throw passwordError('Mot de passe requis', 'PASSWORD_REQUIRED');
+  // Paramètres bornés : un fichier forgé ne doit pas pouvoir épuiser la mémoire
+  if (!blob || blob.kdf !== 'scrypt' || blob.N !== SCRYPT_N || blob.r !== 8 || blob.p !== 1) {
+    throw passwordError('Format de chiffrement non reconnu', 'BAD_FORMAT');
+  }
+  try {
+    const key = crypto.scryptSync(String(password), Buffer.from(blob.salt, 'base64'), 32, SCRYPT_OPTS);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(blob.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(blob.data, 'base64')), decipher.final()]).toString('utf8');
+  } catch (e) {
+    throw passwordError('Mot de passe incorrect', 'BAD_PASSWORD');
+  }
+}
+
+export default { encrypt, decrypt, isEncrypted, encryptWithPassword, decryptWithPassword };

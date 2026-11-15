@@ -23,3 +23,16 @@
 - **Options envisagées** : laisser la clé en clair ; la sceller avec le coffre Windows (DPAPI). Pour la base : écriture directe ou écriture atomique.
 - **Choix** : clé scellée par DPAPI dans l'app installée (`.savana_key.sealed`, l'ancienne clé en clair est supprimée après vérification) ; écriture atomique de `smurfs.db` ; suppression des colonnes et de la route `/api/tokens` qui ne servaient plus.
 - **Effets pour l'utilisateur** : copier le dossier `%AppData%/Savana` ne suffit plus à lire les mots de passe, et un crash pendant une sauvegarde ne corrompt plus la base. Contrepartie : après une réinstallation de Windows, les mots de passe ne sont récupérables que via un export fait avant.
+
+## 2026-11-15 : clé API Riot chiffrée sur disque
+
+- **Question** : la clé API Riot saisie dans l'app (`.riot_api_key`) restait en clair dans `%AppData%/Savana`.
+- **Choix** : la chiffrer avec la clé de la base, elle-même scellée par DPAPI. L'ancienne clé en clair est rechiffrée automatiquement au premier lancement.
+- **Effets pour l'utilisateur** : rien ne change à l'usage. Après une réinstallation de Windows, il faudra ressaisir la clé API.
+
+## 2026-11-15 : export protégé par mot de passe
+
+- **Question** : l'export JSON contenait les identifiants Riot de tous les comptes en clair.
+- **Options envisagées** : export en clair ; export sans identifiants ; identifiants chiffrés avec un mot de passe choisi à l'export.
+- **Choix** : mot de passe obligatoire à l'export (saisi deux fois), redemandé à l'import, avec une nouvelle tentative possible en cas d'erreur. Le reste du fichier (rangs, stats, amis, préférences) reste lisible. Les anciens exports sans mot de passe s'importent toujours.
+- **Effets pour l'utilisateur** : un fichier d'export perdu ou partagé ne révèle plus les identifiants, et il reste utilisable sur une autre machine ou après une réinstallation de Windows. Contrepartie : un mot de passe oublié rend le fichier inimportable.

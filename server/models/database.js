@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
-import { encrypt, decrypt, isEncrypted } from '../utils/crypto.js';
+import { encrypt, decrypt, isEncrypted, encryptWithPassword, decryptWithPassword } from '../utils/crypto.js';
 
 let db = null;
 let SQL = null;
@@ -666,23 +666,28 @@ export function updateSmurfOrder(userId, orderList) {
 
 // === EXPORT / IMPORT ===
 
+// Identifiants exclus : ils partent chiffrés par mot de passe dans `secrets`
 const SMURF_EXPORT_FIELDS = [
-  'puuid', 'pseudo', 'username', 'password',
+  'puuid', 'pseudo',
   'soloq_tier', 'soloq_rank', 'soloq_lp', 'soloq_wins', 'soloq_losses',
   'flex_tier', 'flex_rank', 'flex_lp', 'flex_wins', 'flex_losses',
   'level', 'stats_json', 'sort_order', 'last_updated'
 ];
 
 /**
- * Exporte toutes les données d'un utilisateur (secrets déchiffrés)
- * dans un objet JSON portable.
+ * Exporte toutes les données d'un utilisateur dans un objet JSON portable.
+ * Format v2 : les identifiants Riot sont regroupés dans `secrets`, chiffrés
+ * avec le mot de passe choisi à l'export (lisible sur n'importe quelle machine).
  */
-export function exportUserData(userId) {
+export function exportUserData(userId, password) {
+  const secrets = {};
   const smurfs = getUserSmurfs(userId).map(s => {
     const out = {};
     for (const f of SMURF_EXPORT_FIELDS) out[f] = s[f] !== undefined ? s[f] : null;
+    secrets[s.puuid] = { username: s.username || '', password: s.password || '' };
     return out;
   });
+  const encryptedSecrets = encryptWithPassword(JSON.stringify(secrets), password);
 
   const friends = getUserFriends(userId).map(f => ({
     puuid: f.puuid,
@@ -695,8 +700,9 @@ export function exportUserData(userId) {
 
   return {
     app: 'savana',
-    version: 1,
+    version: 2,
     exported_at: new Date().toISOString(),
+    secrets: encryptedSecrets,
     smurfs,
     friends,
     preferences: {
@@ -710,23 +716,34 @@ export function exportUserData(userId) {
 /**
  * Importe des données exportées : upsert des smurfs et amis par PUUID,
  * mise à jour des préférences. Les secrets sont re-chiffrés à l'écriture.
+ * v2 : identifiants dans `secrets`, déchiffrés avec `password` (erreur
+ * BAD_PASSWORD / PASSWORD_REQUIRED sinon, avant toute écriture).
+ * v1 : identifiants en clair dans chaque compte (anciens exports).
  */
-export function importUserData(userId, data) {
+export function importUserData(userId, data, password) {
   let smurfCount = 0;
   let friendCount = 0;
+
+  const secrets = data.secrets
+    ? JSON.parse(decryptWithPassword(data.secrets, password))
+    : null;
 
   const existingSmurfs = getUserSmurfs(userId);
   for (const s of (data.smurfs || [])) {
     if (!s.puuid || !s.pseudo) continue;
     const statsJson = s.stats_json ? JSON.stringify(s.stats_json) : null;
+    const match = existingSmurfs.find(e => e.puuid === s.puuid);
+    // Identifiants absents du fichier : on garde ceux déjà en base
+    const creds = secrets ? secrets[s.puuid] : s;
+    const username = creds?.username ?? match?.username ?? '';
+    const pwd = creds?.password ?? match?.password ?? '';
     const values = [
-      s.pseudo, encrypt(s.username || ''), encrypt(s.password || ''),
+      s.pseudo, encrypt(username), encrypt(pwd),
       s.soloq_tier ?? null, s.soloq_rank ?? null, s.soloq_lp ?? 0, s.soloq_wins ?? 0, s.soloq_losses ?? 0,
       s.flex_tier ?? null, s.flex_rank ?? null, s.flex_lp ?? 0, s.flex_wins ?? 0, s.flex_losses ?? 0,
       s.level ?? 0, statsJson, s.sort_order ?? null, s.last_updated ?? null
     ];
 
-    const match = existingSmurfs.find(e => e.puuid === s.puuid);
     if (match) {
       db.run(`
         UPDATE smurfs SET
