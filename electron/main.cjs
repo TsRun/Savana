@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, safeStorage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -118,8 +118,12 @@ function createWindow() {
     }
   }
 
+  // Un rechargement du renderer perd le dialogue : on libère ses raccourcis globaux
+  mainWindow.webContents.on('did-start-loading', () => setCopyShortcuts(false));
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    setCopyShortcuts(false);
     stopBackendServer();
   });
 }
@@ -251,6 +255,29 @@ ipcMain.handle('write-clipboard', (event, text) => {
   const { clipboard } = require('electron');
   clipboard.writeText(text);
   return { success: true };
+});
+
+// Ctrl+U / Ctrl+P globaux : copient l'username / le mot de passe du dialogue
+// d'identifiants même quand le focus est sur le Riot Client. Actifs seulement
+// tant que ce dialogue est ouvert, pour ne pas confisquer ces touches ailleurs.
+const COPY_SHORTCUTS = { 'CommandOrControl+U': 'username', 'CommandOrControl+P': 'password' };
+
+function setCopyShortcuts(enabled) {
+  for (const [accelerator, field] of Object.entries(COPY_SHORTCUTS)) {
+    if (!enabled) {
+      if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator);
+      continue;
+    }
+    if (globalShortcut.isRegistered(accelerator)) continue;
+    const ok = globalShortcut.register(accelerator, () => {
+      if (mainWindow) mainWindow.webContents.send('copy-shortcut', field);
+    });
+    if (!ok) console.warn(`[Shortcuts] ${accelerator} déjà pris par une autre application`);
+  }
+}
+
+ipcMain.handle('set-copy-shortcuts', (event, enabled) => {
+  setCopyShortcuts(!!enabled);
 });
 
 // =====================================================
@@ -915,6 +942,10 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   stopBackendServer();
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 ipcMain.handle('get-api-config', () => {

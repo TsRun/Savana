@@ -139,9 +139,28 @@ const handleShortcut = (e) => {
   copyInput(targetKey);
 };
 
-onMounted(() => window.addEventListener('keydown', handleShortcut, true));
+// Hors focus (connexion dans le Riot Client), Electron capte les mêmes
+// raccourcis en global tant que le dialogue d'identifiants est ouvert.
+const globalShortcutsActive = computed(() => props.isOpen && hasCredentialInputs.value);
+watch(globalShortcutsActive, (active) => {
+  window.electronAPI?.setCopyShortcuts?.(active);
+});
+
+const handleGlobalShortcut = (field) => {
+  if (!props.isOpen || inputValues[field] === undefined) return;
+  copyInput(field);
+};
+
+let stopGlobalShortcut = null;
+
+onMounted(() => {
+  window.addEventListener('keydown', handleShortcut, true);
+  stopGlobalShortcut = window.electronAPI?.onCopyShortcut?.(handleGlobalShortcut) || null;
+});
 onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut, true);
+  stopGlobalShortcut?.();
+  if (globalShortcutsActive.value) window.electronAPI?.setCopyShortcuts?.(false);
   clearTimeout(copiedTimer);
 });
 

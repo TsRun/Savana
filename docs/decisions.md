@@ -47,3 +47,10 @@
   - Rang + plus de modes (ARAM, Arena, normales), chacun avec ses stats.
 - **Choix** : rang + KDA / rôle / champions du mode choisi. Le filtre ne propose plus que SoloQ et Flex ; la notion de période disparaît ; les stats portent sur les 20 dernières parties du mode (indiqué au survol de la carte). Les deux modes sont calculés à chaque actualisation, donc changer de filtre est instantané. Les amis suivent exactement le même modèle (mémoire du rang, Riot ID suivi, winrate de la saison comme sur les cartes de comptes).
 - **Effets pour l'utilisateur** : plus de chiffres mélangés entre modes ; une actualisation de 10 comptes passe d'environ 5 minutes à environ 1 minute, car seules les nouvelles parties sont téléchargées ; une erreur de l'API (clé expirée) n'efface plus ni le rang ni les stats. Contrepartie : la première actualisation après la mise à jour télécharge jusqu'à 40 parties par compte (quelques minutes), et les stats ARAM / Arena / normales ne sont plus disponibles.
+
+## 2026-11-16 : Ctrl+U / Ctrl+P hors focus
+
+- **Question** : pendant la connexion manuelle, le focus est sur le Riot Client, donc les raccourcis de copie de l'username et du mot de passe ne marchaient pas sans revenir cliquer dans Savana.
+- **Options envisagées** : raccourcis globaux en permanence ; raccourcis globaux seulement pendant que le dialogue d'identifiants est ouvert ; autre combinaison de touches (Ctrl+Alt+U...).
+- **Choix** : Ctrl+U / Ctrl+P globaux, actifs uniquement tant que le dialogue d'identifiants est ouvert.
+- **Pourquoi** : l'utilisateur garde les mêmes touches qu'il connaît, utilisables depuis le Riot Client. Le reste du temps, Ctrl+P (imprimer) et Ctrl+U restent libres pour les autres applications.

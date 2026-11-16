@@ -9,6 +9,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // === Events ===
   onLaunchStatus: (callback) => ipcRenderer.on('launch-status', (event, ...args) => callback(...args)),
 
+  // === Raccourcis globaux de copie (Ctrl+U / Ctrl+P hors focus) ===
+  setCopyShortcuts: (enabled) => ipcRenderer.invoke('set-copy-shortcuts', enabled),
+  onCopyShortcut: (callback) => {
+    const listener = (event, field) => callback(field);
+    ipcRenderer.on('copy-shortcut', listener);
+    return () => ipcRenderer.removeListener('copy-shortcut', listener);
+  },
+
   // === Auto-update ===
   onUpdateStatus: (callback) => ipcRenderer.on('update-status', (event, data) => callback(data)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
