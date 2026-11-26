@@ -64,7 +64,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "public/SavanaLogo.jpg"
+      "icon": "public/SavanaLogo.png"
     },
     "linux": {
       "target": [
